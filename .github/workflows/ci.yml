@@ -26,6 +26,16 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -46,9 +56,9 @@ jobs:
         run: |
           cd backend
           # stop the build if there are Python syntax errors or undefined names
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=venv,.venv
           # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics --exclude=venv,.venv
 
       - name: Type check with mypy
         run: |
@@ -60,6 +70,11 @@ jobs:
       - name: Run tests with pytest
         env:
           TEST_DATABASE_URL: postgresql://postgres:fota_password@localhost:5432/fota_db_test
+          POSTGRES_DB: fota_db_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: fota_password
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
           STORAGE_ROOT: ./test_data
           PYTHONPATH: .
         run: |
