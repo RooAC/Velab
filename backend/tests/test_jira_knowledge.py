@@ -6,6 +6,7 @@ no real API key is required.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -119,6 +120,32 @@ class TestExecute:
         result = await agent.execute("校验失败", keywords=["校验失败"])
         # May succeed or gracefully degrade; either way sources is a list
         assert isinstance(result.sources, list)
+
+    @pytest.mark.asyncio
+    async def test_embed_index_loader_accepts_versioned_payload(self, agent, tmp_path, monkeypatch):
+        import agents.jira_knowledge as mod
+        from services.vector_search import VectorSearchService
+
+        index_dir = tmp_path / "data" / "vector_index"
+        index_dir.mkdir(parents=True)
+        payload = {
+            "version": 1,
+            "count": 1,
+            "items": [
+                {
+                    "preview": "FOTA-9123",
+                    "vector": [1.0, 0.0],
+                    "metadata": {"key": "FOTA-9123", "summary": "test"},
+                }
+            ],
+        }
+        index_path = index_dir / "jira_tickets.json"
+        index_path.write_text(json.dumps(payload), encoding="utf-8")
+        monkeypatch.setattr(mod, "INDEX_DIR", index_dir)
+
+        svc = VectorSearchService(use_embeddings=True)
+        loaded = svc.load_embed_index(index_path)
+        assert loaded == 1
 
     @pytest.mark.asyncio
     async def test_execute_with_llm_mock(self, agent):

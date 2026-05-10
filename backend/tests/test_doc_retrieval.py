@@ -4,7 +4,7 @@ vector_service.search_documents is mocked so no embedding model is needed.
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -60,7 +60,7 @@ class TestExecute:
     async def test_returns_agent_result_with_documents(self, agent):
         with (
             patch.object(agent, "_load_documents", return_value=_FAKE_DOCS),
-            patch("agents.doc_retrieval.vector_service.search_documents", return_value=_FAKE_RESULTS),
+            patch.object(agent, "_search_documents", new_callable=AsyncMock, return_value=_FAKE_RESULTS),
         ):
             result = await agent.execute("FOTA 升级状态机死循环")
 
@@ -82,7 +82,7 @@ class TestExecute:
     async def test_no_search_results_returns_failure(self, agent):
         with (
             patch.object(agent, "_load_documents", return_value=_FAKE_DOCS),
-            patch("agents.doc_retrieval.vector_service.search_documents", return_value=[]),
+            patch.object(agent, "_search_documents", new_callable=AsyncMock, return_value=[]),
         ):
             result = await agent.execute("不存在的查询词 XYZ")
 
@@ -93,7 +93,7 @@ class TestExecute:
         high_score_result = [{**_FAKE_RESULTS[0], "similarity_score": 0.8}]
         with (
             patch.object(agent, "_load_documents", return_value=_FAKE_DOCS),
-            patch("agents.doc_retrieval.vector_service.search_documents", return_value=high_score_result),
+            patch.object(agent, "_search_documents", new_callable=AsyncMock, return_value=high_score_result),
         ):
             result = await agent.execute("FOTA 状态机")
 
@@ -104,7 +104,7 @@ class TestExecute:
         low_score_result = [{**_FAKE_RESULTS[0], "similarity_score": 0.1}]
         with (
             patch.object(agent, "_load_documents", return_value=_FAKE_DOCS),
-            patch("agents.doc_retrieval.vector_service.search_documents", return_value=low_score_result),
+            patch.object(agent, "_search_documents", new_callable=AsyncMock, return_value=low_score_result),
         ):
             result = await agent.execute("FOTA 状态机")
 
@@ -114,13 +114,13 @@ class TestExecute:
     async def test_keywords_concatenated_into_query(self, agent):
         captured = {}
 
-        def _capture(query, docs, **kwargs):
+        async def _capture(query, docs):
             captured["query"] = query
             return _FAKE_RESULTS
 
         with (
             patch.object(agent, "_load_documents", return_value=_FAKE_DOCS),
-            patch("agents.doc_retrieval.vector_service.search_documents", side_effect=_capture),
+            patch.object(agent, "_search_documents", side_effect=_capture),
         ):
             await agent.execute("升级失败", keywords=["校验", "eMMC"])
 
@@ -135,7 +135,7 @@ class TestExecute:
             settings.AGENTS_USE_LLM = True
             with (
                 patch.object(agent, "_load_documents", return_value=_FAKE_DOCS),
-                patch("agents.doc_retrieval.vector_service.search_documents", return_value=_FAKE_RESULTS),
+                patch.object(agent, "_search_documents", new_callable=AsyncMock, return_value=_FAKE_RESULTS),
                 patch.object(
                     agent, "_llm_summarize",
                     new_callable=AsyncMock,
@@ -155,3 +155,21 @@ class TestExecute:
             assert result.summary == "LLM 总结"
         finally:
             settings.AGENTS_USE_LLM = original
+
+    @pytest.mark.asyncio
+    async def test_execute_uses_embedding_path_when_enabled(self, agent, monkeypatch):
+        from config import settings
+        import agents.doc_retrieval as mod
+
+        original = settings.AGENTS_USE_EMBEDDINGS
+        try:
+            settings.AGENTS_USE_EMBEDDINGS = True
+            monkeypatch.setattr(mod, "DOC_EMBED_INDEX_PATH", mod.DOC_EMBED_INDEX_PATH)
+            with (
+                patch.object(agent, "_load_documents", return_value=_FAKE_DOCS),
+                patch.object(agent, "_search_documents", new_callable=AsyncMock, return_value=_FAKE_RESULTS),
+            ):
+                result = await agent.execute("FOTA 升级状态机死循环")
+            assert result.success is True
+        finally:
+            settings.AGENTS_USE_EMBEDDINGS = original

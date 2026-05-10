@@ -6,9 +6,15 @@
 
 ## [Unreleased]
 
+### Added
+- **Embedding 知识检索闭环**：`jira_knowledge` 与 `doc_retrieval` 现在支持 `AGENTS_USE_EMBEDDINGS=true` 时优先加载离线预计算索引（`backend/data/indexes/vector/`），启动时会预热 `jira_tickets.json` / `tech_docs.json`，并在 `AgentResult` / workspace notes 中透传 `retrieval_mode`（`embedding` / `tfidf` / `tfidf_fallback`）。
+- **预计算索引版本化**：`services/vector_search.py` 的索引文件新增 `version` 与 `items` 结构，并对格式进行读取校验，避免未来格式升级时静默失配。
+- **知识检索可观测性增强**：检索结果 now carry `retrieval_mode`，方便在日志、workspace 与后续排障中识别实际命中的检索路径。
+
 ### Fixed
 - **Scenario B 模型全部落到 Haiku**：`llm.py` 的 `_resolve_anthropic_model()` / `_resolve_openai_model()` 原将三个虚拟别名（`router-model`、`agent-model`、`synthesizer-model`）统一映射到同一个 `ANTHROPIC_DEFAULT_MODEL`（默认 `claude-haiku-4-5-20251001`），导致场景 B 直连模式下所有 Agent（含 RCA 根因分析）均跑 Haiku。
 - **`rca_synthesizer.py` 错用 `agent-model`**：`_llm_synthesize()` 中 `model="agent-model"` 改为 `model="synthesizer-model"`，确保 RCA 走 Synthesizer 层路由。
+- **Embedding 索引未被运行时消费**：`doc_retrieval.py` 之前始终走 TF-IDF，`jira_knowledge.py` 之前每次请求重复全量向量化，现已统一为“预计算索引优先 + 在线 embedding 兜底 + TF-IDF 回退”的生产链路。
 
 ### Changed
 - `services/llm.py`：三层别名分别映射，各自支持独立环境变量覆盖：
@@ -17,6 +23,9 @@
   - `synthesizer-model` → `ANTHROPIC_SYNTHESIZER_MODEL`（默认 `claude-sonnet-4-6`）/ `OPENAI_SYNTHESIZER_MODEL`（默认 `gpt-4o`）
 - `backend/.env` / `.env.example`：废弃 `ANTHROPIC_DEFAULT_MODEL`，替换为三条分层配置注释。
 - `_pick_available_anthropic_model()` 降级列表：首位改为读取 `ANTHROPIC_AGENT_MODEL`，`claude-sonnet-4-6` 置于优先队首。
+- `backend/main.py`：启动时预热 embedding 索引，降低首请求延迟并保证离线索引可直接复用。
+- `backend/services/vector_search.py`：embedding 索引增加版本号与进程内缓存，查询结果增加 `retrieval_mode`，embedding 失败显式回退 TF-IDF。
+- `backend/agents/base.py`：`AgentResult` 增加 `retrieval_mode` 字段，统一承载检索模式信息。
 
 ---
 
