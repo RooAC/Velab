@@ -20,6 +20,9 @@ from pathlib import Path
 from collections import Counter
 from typing import List, Dict, Any, Optional, Tuple
 
+EMBED_INDEX_FORMAT_VERSION = 1
+_EMBED_INDEX_CACHE: Dict[str, dict[str, Any]] = {}
+
 logger = logging.getLogger(__name__)
 
 
@@ -107,7 +110,7 @@ class VectorSearchService:
         results = self._search_with_tfidf(query, top_k, min_score=0.05)
 
         return [
-            {**r["metadata"], "similarity_score": r["score"]}
+            {**r["metadata"], "similarity_score": r["score"], "retrieval_mode": r.get("retrieval_mode", "tfidf")}
             for r in results
         ]
 
@@ -137,7 +140,7 @@ class VectorSearchService:
         results = self._search_with_tfidf(query, top_k, min_score=0.05)
 
         return [
-            {**r["metadata"], "similarity_score": r["score"]}
+            {**r["metadata"], "similarity_score": r["score"], "retrieval_mode": r.get("retrieval_mode", "tfidf")}
             for r in results
         ]
 
@@ -239,6 +242,7 @@ class VectorSearchService:
                     "score": round(score, 4),
                     "text_preview": text_preview,
                     "metadata": metadata,
+                    "retrieval_mode": "tfidf",
                 })
 
         scored.sort(key=lambda x: x["score"], reverse=True)
@@ -284,10 +288,20 @@ class VectorSearchService:
         """使用 embedding 相似度搜索；若索引为空则 fallback 到 TF-IDF。"""
         if not self._embed_vectors:
             logger.warning("Embedding index empty, falling back to TF-IDF")
-            return self._search_with_tfidf(query, top_k, min_score)
+            results = self._search_with_tfidf(query, top_k, min_score)
+            for item in results:
+                item["retrieval_mode"] = "tfidf_fallback"
+            return results
 
         from services.llm import get_embeddings
-        query_vec = await get_embeddings(query[:8000])
+        try:
+            query_vec = await get_embeddings(query[:8000])
+        except Exception as exc:
+            logger.warning("Failed to embed query, falling back to TF-IDF: %s", exc)
+            results = self._search_with_tfidf(query, top_k, min_score)
+            for item in results:
+                item["retrieval_mode"] = "tfidf_fallback"
+            return results
 
         scored = []
         for text_preview, doc_vec, metadata in self._embed_vectors:
@@ -297,6 +311,7 @@ class VectorSearchService:
                     "score": round(score, 4),
                     "text_preview": text_preview,
                     "metadata": metadata,
+                    "retrieval_mode": "embedding",
                 })
 
         scored.sort(key=lambda x: x["score"], reverse=True)
@@ -311,25 +326,53 @@ class VectorSearchService:
         """
         import os
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = [
-            {"preview": preview, "vector": vec, "metadata": meta}
-            for preview, vec, meta in self._embed_vectors
-        ]
+        payload = {
+            "version": EMBED_INDEX_FORMAT_VERSION,
+            "count": len(self._embed_vectors),
+            "items": [
+                {"preview": preview, "vector": vec, "metadata": meta}
+                for preview, vec, meta in self._embed_vectors
+            ],
+        }
         partial_path = path.with_suffix(path.suffix + ".partial")
         partial_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         os.replace(partial_path, path)
-        logger.info("Saved %d embedding vectors to %s", len(payload), path)
-        return len(payload)
+        logger.info("Saved %d embedding vectors to %s", len(self._embed_vectors), path)
+        return len(self._embed_vectors)
 
     def load_embed_index(self, path: Path) -> int:
         """从 JSON 文件加载预计算的 embedding 向量。"""
+        cache_key = str(path.resolve())
+        if cache_key in _EMBED_INDEX_CACHE:
+            cached = _EMBED_INDEX_CACHE[cache_key]
+            self._embed_vectors = [
+                (item["preview"], item["vector"], item["metadata"])
+                for item in cached["items"]
+            ]
+            logger.info("Loaded %d embedding vectors from cache for %s", len(self._embed_vectors), path)
+            return len(self._embed_vectors)
         if not path.exists():
             return 0
         payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, list):
+            items = payload
+        else:
+            if payload.get("version") != EMBED_INDEX_FORMAT_VERSION:
+                logger.warning("Unsupported embedding index version in %s", path)
+                return 0
+            items = payload.get("items", [])
+        validated_items = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if "preview" not in item or "vector" not in item or "metadata" not in item:
+                continue
+            validated_items.append(item)
         self._embed_vectors = [
             (item["preview"], item["vector"], item["metadata"])
-            for item in payload
+            for item in validated_items
         ]
+        _EMBED_INDEX_CACHE[cache_key] = {"version": EMBED_INDEX_FORMAT_VERSION, "items": validated_items}
         logger.info("Loaded %d embedding vectors from %s", len(self._embed_vectors), path)
         return len(self._embed_vectors)
 
@@ -355,7 +398,10 @@ class VectorSearchService:
 
         await self._index_with_embeddings(docs, "text")
         results = await self._search_with_embeddings(query, top_k, min_score=0.3)
-        return [{**r["metadata"], "similarity_score": r["score"]} for r in results]
+        return [
+            {**r["metadata"], "similarity_score": r["score"], "retrieval_mode": r.get("retrieval_mode", "embedding")}
+            for r in results
+        ]
 
     async def async_search_documents(
         self,
@@ -374,8 +420,12 @@ class VectorSearchService:
 
         await self._index_with_embeddings(docs, "text")
         results = await self._search_with_embeddings(query, top_k, min_score=0.3)
-        return [{**r["metadata"], "similarity_score": r["score"]} for r in results]
+        return [
+            {**r["metadata"], "similarity_score": r["score"], "retrieval_mode": r.get("retrieval_mode", "embedding")}
+            for r in results
+        ]
 
 
-# 全局单例：AGENTS_USE_EMBEDDINGS 由 config 控制，在 main.py lifespan 中初始化
-vector_service = VectorSearchService(use_embeddings=False)
+# 全局单例：默认由配置控制；运行时可复用同一服务实例
+# 注意：embedding 模式是否开启由 Settings.AGENTS_USE_EMBEDDINGS 决定。
+vector_service = VectorSearchService()

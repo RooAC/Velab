@@ -19,13 +19,15 @@ from pathlib import Path
 from agents.base import BaseAgent, AgentResult, registry
 from common.chain_log import sync_step_timer
 from config import settings
-from services.vector_search import vector_service
+from services.vector_search import VectorSearchService, vector_service
 
 log = logging.getLogger(__name__)
 
 # 文档数据目录
 DOC_DIR = Path(__file__).resolve().parent.parent / "data" / "docs"
 JIRA_DIR = Path(__file__).resolve().parent.parent / "data" / "jira_mock"
+EMBED_INDEX_DIR = Path(__file__).resolve().parent.parent / "data" / settings.VECTOR_INDEX_DIR
+DOC_EMBED_INDEX_PATH = EMBED_INDEX_DIR / "tech_docs.json"
 
 _SYSTEM_PROMPT = """\
 你是 FOTA 技术文档专家。根据检索到的技术规范和文档片段，提炼与当前故障直接相关的技术要点。
@@ -85,7 +87,7 @@ class DocRetrievalAgent(BaseAgent):
             if keywords:
                 query = f"{task} {' '.join(keywords)}"
 
-            results = vector_service.search_documents(query, documents, top_k=5)
+            results = await self._search_documents(query, documents)
 
             if not results:
                 result = AgentResult(
@@ -108,10 +110,12 @@ class DocRetrievalAgent(BaseAgent):
                 title = doc.get("title", f"文档 {i}")
                 excerpt = doc.get("excerpt", doc.get("content", ""))[:300]
                 score = doc.get("similarity_score", 0)
+                mode = doc.get("retrieval_mode", "tfidf")
 
                 detail_parts.append(
                     f"### {i}. 《{title}》\n"
-                    f"**相关度**: {score:.0%}\n\n"
+                    f"**相关度**: {score:.0%}  \n"
+                    f"**检索模式**: {mode}\n\n"
                     f"{excerpt}\n"
                 )
                 sources.append({
@@ -120,6 +124,7 @@ class DocRetrievalAgent(BaseAgent):
                     "url": "#",
                 })
 
+            retrieval_mode = results[0].get("retrieval_mode", "tfidf") if results else "tfidf"
             result = AgentResult(
                 agent_name=self.name,
                 display_name=self.display_name,
@@ -128,7 +133,8 @@ class DocRetrievalAgent(BaseAgent):
                 summary=f"检索到 {len(results)} 份相关技术文档",
                 detail="\n".join(detail_parts),
                 sources=sources,
-                raw_data={"matched_count": len(results)},
+                raw_data={"matched_count": len(results), "retrieval_mode": retrieval_mode},
+                retrieval_mode=retrieval_mode,
             )
 
             # LLM 总结层：将检索片段提炼为叙述性技术分析
@@ -168,7 +174,38 @@ class DocRetrievalAgent(BaseAgent):
             detail=llm_text.strip(),
             sources=retrieval_result.sources,
             raw_data={**(retrieval_result.raw_data or {}), "llm": True},
+            retrieval_mode=retrieval_result.retrieval_mode,
         )
+
+    async def _search_documents(self, query: str, documents: list[dict]) -> list[dict]:
+        """Search documents with embedding mode when enabled, otherwise TF-IDF."""
+        if settings.AGENTS_USE_EMBEDDINGS:
+            try:
+                svc = VectorSearchService(use_embeddings=True)
+                if self._load_embed_index_if_available(svc, DOC_EMBED_INDEX_PATH):
+                    results = await svc.search(query, top_k=5, min_score=0.3)
+                    return [
+                        {
+                            **r["metadata"],
+                            "similarity_score": r["score"],
+                            "retrieval_mode": r.get("retrieval_mode", "embedding"),
+                        }
+                        for r in results
+                    ]
+
+                return await svc.async_search_documents(query, documents, top_k=5)
+            except Exception as exc:
+                log.warning("Embedding document search failed, falling back to TF-IDF: %s", exc)
+
+        return vector_service.search_documents(query, documents, top_k=5)
+
+    def _load_embed_index_if_available(self, svc: VectorSearchService, path: Path) -> bool:
+        """Load a precomputed embedding index if it exists and is usable."""
+        try:
+            return svc.load_embed_index(path) > 0
+        except Exception as exc:
+            log.warning("Failed to load embedding index from %s: %s", path, exc)
+            return False
 
     async def _write_workspace(self, context: dict | None, result: AgentResult) -> None:
         """将文档检索结果写入 workspace (可选，降级安全)"""
@@ -178,7 +215,7 @@ class DocRetrievalAgent(BaseAgent):
             from services.tool_functions import append_workspace_notes, update_todo_status
             ws_path = context["workspace_path"]
 
-            notes_content = f"**摘要**: {result.summary}\n**置信度**: {result.confidence}\n\n{result.detail or '无结果'}"
+            notes_content = f"**摘要**: {result.summary}\n**置信度**: {result.confidence}\n**检索模式**: {result.retrieval_mode or 'unknown'}\n\n{result.detail or '无结果'}"
             await append_workspace_notes(ws_path, self.display_name, notes_content)
 
             await update_todo_status(ws_path, "技术文档匹配", completed=result.success)

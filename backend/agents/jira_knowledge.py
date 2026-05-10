@@ -9,8 +9,10 @@ from pathlib import Path
 from agents.base import BaseAgent, AgentResult, registry
 from common.chain_log import sync_step_timer
 from config import settings
+from services.vector_search import VectorSearchService
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "jira_mock"
+INDEX_DIR = Path(__file__).resolve().parent.parent / "data" / settings.VECTOR_INDEX_DIR
 
 log = logging.getLogger(__name__)
 
@@ -71,16 +73,25 @@ class JiraKnowledgeAgent(BaseAgent):
             if tickets:
                 detail_parts.append("**类似历史 Jira 工单：**\n")
                 for t in tickets:
-                    detail_parts.append(f"- **{t['key']}**: {t['summary']}")
+                    mode = t.get("retrieval_mode", "tfidf")
+                    detail_parts.append(f"- **{t['key']}**: {t['summary']}（{mode}）")
                     detail_parts.append(f"  修复方案: {t['resolution']}\n")
                     sources.append({"title": f"{t['key']}: {t['summary']}", "type": "jira", "url": "#"})
 
             if documents:
                 detail_parts.append("\n**相关离线文档：**\n")
                 for d in documents:
-                    detail_parts.append(f"- 《{d['title']}》")
+                    mode = d.get("retrieval_mode", "tfidf")
+                    detail_parts.append(f"- 《{d['title']}》 （{mode}）")
                     detail_parts.append(f"  摘要: {d['excerpt']}\n")
                     sources.append({"title": d["title"], "type": "pdf", "url": "#"})
+
+            retrieval_mode = "tfidf"
+            if settings.AGENTS_USE_EMBEDDINGS:
+                if tickets and tickets[0].get("retrieval_mode"):
+                    retrieval_mode = tickets[0]["retrieval_mode"]
+                elif documents and documents[0].get("retrieval_mode"):
+                    retrieval_mode = documents[0]["retrieval_mode"]
 
             result = AgentResult(
                 agent_name=self.name,
@@ -90,6 +101,8 @@ class JiraKnowledgeAgent(BaseAgent):
                 summary=f"找到 {len(tickets)} 个相关工单，{len(documents)} 份相关文档",
                 detail="\n".join(detail_parts),
                 sources=sources,
+                raw_data={"retrieval_mode": retrieval_mode},
+                retrieval_mode=retrieval_mode,
             )
 
             # LLM 总结层：在检索结果基础上生成叙述性分析
@@ -130,6 +143,7 @@ class JiraKnowledgeAgent(BaseAgent):
             detail=llm_text.strip(),
             sources=retrieval_result.sources,
             raw_data={**(retrieval_result.raw_data or {}), "llm": True},
+            retrieval_mode=retrieval_result.retrieval_mode,
         )
 
     async def _write_workspace(self, context: dict | None, result: AgentResult) -> None:
@@ -140,7 +154,7 @@ class JiraKnowledgeAgent(BaseAgent):
             from services.tool_functions import append_workspace_notes, update_todo_status
             ws_path = context["workspace_path"]
 
-            notes_content = f"**摘要**: {result.summary}\n**置信度**: {result.confidence}\n\n{result.detail or '无结果'}"
+            notes_content = f"**摘要**: {result.summary}\n**置信度**: {result.confidence}\n**检索模式**: {result.retrieval_mode or 'unknown'}\n\n{result.detail or '无结果'}"
             await append_workspace_notes(ws_path, self.display_name, notes_content)
 
             await update_todo_status(ws_path, "历史工单关联", completed=result.success)
@@ -148,26 +162,58 @@ class JiraKnowledgeAgent(BaseAgent):
             log.warning("Workspace write failed in %s: %s", self.name, e)
 
     async def _search_tickets_embed(self, keywords: list[str], task: str) -> list[dict]:
-        """Embedding 模式搜索 Jira 工单（语义相似度）。"""
-        from services.vector_search import VectorSearchService
+        """Embedding 模式搜索 Jira 工单（优先加载预计算索引）。"""
+        tickets = self._load_mock_tickets()
+        if not tickets:
+            return []
+
+        svc = VectorSearchService(use_embeddings=True)
+        index_path = INDEX_DIR / "jira_tickets.json"
+        if self._load_embed_index_if_available(svc, index_path):
+            try:
+                query = task if not keywords else f"{task} {' '.join(keywords)}"
+                results = await svc.search(query, top_k=5, min_score=0.3)
+                return [{**r["metadata"], "similarity_score": r["score"]} for r in results]
+            except Exception as exc:
+                log.warning("Loaded ticket embedding index search failed, falling back to online embedding: %s", exc)
+
         try:
-            svc = VectorSearchService(use_embeddings=True)
-            tickets = self._load_mock_tickets()
             return await svc.async_search_jira_issues(task, tickets, top_k=5)
         except Exception as exc:
             log.warning("Embedding ticket search failed, falling back to keyword: %s", exc)
             return self._search_tickets(keywords, task)
 
     async def _search_documents_embed(self, keywords: list[str], task: str) -> list[dict]:
-        """Embedding 模式搜索技术文档（语义相似度）。"""
-        from services.vector_search import VectorSearchService
+        """Embedding 模式搜索技术文档（优先加载预计算索引）。"""
+        docs = self._load_mock_docs()
+        if not docs:
+            return []
+
+        svc = VectorSearchService(use_embeddings=True)
+        index_path = INDEX_DIR / "tech_docs.json"
+        if self._load_embed_index_if_available(svc, index_path):
+            try:
+                query = task if not keywords else f"{task} {' '.join(keywords)}"
+                results = await svc.search(query, top_k=3, min_score=0.3)
+                return [{**r["metadata"], "similarity_score": r["score"]} for r in results]
+            except Exception as exc:
+                log.warning("Loaded document embedding index search failed, falling back to online embedding: %s", exc)
+
         try:
-            svc = VectorSearchService(use_embeddings=True)
-            docs = self._load_mock_docs()
             return await svc.async_search_documents(task, docs, top_k=3)
         except Exception as exc:
             log.warning("Embedding document search failed, falling back to keyword: %s", exc)
             return self._search_documents(keywords)
+
+    def _load_embed_index_if_available(self, svc: VectorSearchService, path: Path) -> bool:
+        """Load a precomputed embedding index if it exists and looks valid."""
+        try:
+            if not path.exists():
+                return False
+            return svc.load_embed_index(path) > 0
+        except Exception as exc:
+            log.warning("Failed to load embedding index from %s: %s", path, exc)
+            return False
 
     def _search_tickets(self, keywords: list[str], task: str = "") -> list[dict]:
         """Search mock Jira tickets by keywords or ticket numbers extracted from task text."""

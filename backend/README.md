@@ -51,7 +51,7 @@ backend/
 │
 ├── services/                     # 服务层（不含日志解析；日志解析全部走 log_pipeline）
 │   ├── llm.py
-│   ├── vector_search.py
+│   ├── vector_search.py         # TF-IDF + Embedding 检索，支持预计算索引/启动预热
 │   ├── semantic_cache.py
 │   ├── tool_functions.py         # Agent Tool Use（workspace 读写）
 │   ├── workspace_manager.py      # Agent Markdown 工作区沙盒
@@ -139,6 +139,26 @@ curl -F "file=@/path/to/bundle.zip" http://localhost:8000/api/bundles
 
 curl http://localhost:8000/api/bundles/{bundle_id}
 # → {"status":"prescanning","progress":0.72,"file_count":42,...}
+```
+
+### 6. 检查知识库检索模式
+```bash
+# 开启 embedding 后，jira_knowledge / doc_retrieval 会优先加载预计算索引
+export AGENTS_USE_EMBEDDINGS=true
+
+# 预计算索引默认落盘到 backend/data/indexes/vector/
+# - jira_tickets.json
+# - tech_docs.json
+
+# 启动后会自动预热索引，workspace notes 与 AgentResult 中会记录 retrieval_mode
+```
+
+### 7. 预计算索引生成
+```bash
+cd backend
+python scripts/ingest_embeddings.py
+
+# 生成的索引会用于运行时快速检索，建议在数据更新后重新生成
 ```
 
 ---

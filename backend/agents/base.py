@@ -40,6 +40,7 @@ class AgentResult:
         detail: 详细分析结果（支持 Markdown 格式）
         sources: 引用来源列表，每项包含 title、type、url 等字段
         raw_data: 原始数据字典，用于调试或后续处理
+        retrieval_mode: 检索模式（如 embedding / tfidf / tfidf_fallback）
     """
     agent_name: str
     display_name: str
@@ -49,6 +50,7 @@ class AgentResult:
     detail: str = ""
     sources: list[dict] = field(default_factory=list)
     raw_data: dict = field(default_factory=dict)
+    retrieval_mode: str = ""
 
 
 class BaseAgent(ABC):
