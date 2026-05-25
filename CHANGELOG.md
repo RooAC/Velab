@@ -6,7 +6,23 @@
 
 ## [Unreleased]
 
-_暂无未发布变更。_
+### Changed
+- **技术债深度清理（零 lint 错误目标）**
+  - 后端 `datetime.utcnow()` 全量替换为 `datetime.now(timezone.utc)`：
+    `models/case.py`、`models/chat_session.py`、`models/diagnosis.py`、`api/feedback.py`、`api/session_store.py`、`services/semantic_cache.py`、`tests/conftest.py`（SQLAlchemy `Column(default=)` 用 lambda 包装）。`pytest -W error::DeprecationWarning` 通过。
+  - `ruff` 三轮自动修复共消除 233 个问题：F401 未使用 import × 45、W293 空白行尾随空格 × 63、E302/E303/E305 空行规则 × 6 等。
+  - 手工修复真实 bug：`services/evaluation.py` 缩进与单行 `if` 语句拆分；`main.py:272` `agents` 局部变量遮蔽导入名（重命名为 `registered_agents`）。
+  - 清理无用局部变量：`log_pipeline/decoders/stage.py`（`total`）、`log_pipeline/tests/test_prescan.py`（`p`/`fake_year`/`real_line`）、`log_pipeline/tests/test_query.py`（`year`/`dt`）、`tasks/worker.py`（`redis`）、`tests/test_log_analytics_bundle.py`（`mock_ws`）。
+  - 长行重排：`agents/doc_retrieval.py`、`agents/jira_knowledge.py` 的 `notes_content` 多行 f-string 化；`tests/test_log_analytics_bundle.py` 长 MagicMock 调用多行化。
+  - 入口脚本 sys.path 后置 import 加 `# noqa: E402`：`run_worker.py`、`scripts/ingest_embeddings.py`、`tests/test_doc_chunker_xlsx.py`。
+  - 前端：`npm audit fix` 修复 3 个 Next.js CVE（缓存投毒 + 中间件绕过）；`eslint.config.mjs` 忽略 `coverage/**`；`DocManagerButton.tsx`/`bundle-logs/route.test.ts` 移除未用 catch 变量。
+- **新增 `backend/.flake8` 配置**：`max-line-length = 127`，`extend-ignore = E203`（PEP 8 切片风格分歧），`max-complexity = 25`，`per-file-ignores = agents/orchestrator.py:E501,C901`（系统提示词长字符串与 orchestrate 协调函数）。
+
+### Verified
+- 后端 `flake8 .` → **0 issues**；CI 严格模式（`E9,F63,F7,F82`）→ **0 issues**。
+- 后端 `pytest -q` → **444 passed**（无回归）。
+- 前端 `npm test -- --run` → **226 passed | 11 skipped**（11 个 skipped 为 FeedbackButtons + page.test 的预存 Vitest 定时器/SSE flaky 用例，独立追踪）。
+- 前端 `npm run lint` → 0 warnings；`npm audit` → 0 vulnerabilities。
 
 ---
 

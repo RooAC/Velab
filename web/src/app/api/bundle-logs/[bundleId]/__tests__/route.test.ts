@@ -23,7 +23,7 @@ describe('GET /api/bundle-logs/[bundleId]', () => {
   it('转发到 /api/bundles/{id}/logs', async () => {
     mockFetch.mockResolvedValue({
       status: 200,
-      headers: { get: (_: string) => null },
+      headers: { get: () => null },
       text: async () => 'line1\nline2',
     })
     const req = new NextRequest('http://localhost/api/bundle-logs/b1')

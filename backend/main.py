@@ -141,7 +141,7 @@ app.include_router(metrics_router)
 async def root():
     """
     根路径 - API信息
-    
+
     Returns:
         API基本信息和可用端点
     """
@@ -162,17 +162,17 @@ async def root():
 async def chat(request: Request):
     """
     诊断对话接口（SSE 流式响应）
-    
+
     接收用户的诊断问题，通过 Orchestrator 编排多个 Agent 进行分析，
     并以 SSE 格式流式返回分析过程和最终结果。
-    
+
     请求体格式：
     {
         "message": "用户的诊断问题",
         "scenarioId": "场景 ID（如 fota-diagnostic）",
         "history": [{"role": "user/assistant", "content": "..."}]  // 可选的对话历史
     }
-    
+
     响应格式（SSE 事件流）：
     - step_start: Agent 开始执行
     - step_progress: Agent 执行进度更新
@@ -181,10 +181,10 @@ async def chat(request: Request):
     - content_delta: 流式输出回复内容
     - content_complete: 回复生成完成
     - done: 整个流程结束
-    
+
     Args:
         request: FastAPI Request 对象
-    
+
     Returns:
         EventSourceResponse: SSE 流式响应
     """
@@ -255,9 +255,9 @@ async def chat(request: Request):
 async def health():
     """
     健康检查接口
-    
+
     返回服务状态和已注册的 Agent 列表，用于监控和调试。
-    
+
     Returns:
         dict: 包含 status 和 agents 列表的字典
             {
@@ -269,8 +269,8 @@ async def health():
             }
     """
     from agents.base import registry
-    agents = [{"name": a.name, "display_name": a.display_name} for a in registry.all_agents()]
-    return {"status": "ok", "agents": agents}
+    registered_agents = [{"name": a.name, "display_name": a.display_name} for a in registry.all_agents()]
+    return {"status": "ok", "agents": registered_agents}
 
 
 if __name__ == "__main__":

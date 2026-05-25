@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone

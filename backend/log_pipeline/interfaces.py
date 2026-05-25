@@ -172,6 +172,7 @@ def is_effective_wall_clock_ts(ts: Optional[float]) -> bool:
         return False
     return True
 
+
 BUCKET_SECONDS: int = 300
 """5-minute bucket size for the file-level time index."""
 

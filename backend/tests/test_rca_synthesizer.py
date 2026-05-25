@@ -8,7 +8,6 @@ Only stateless, non-LLM methods are tested here:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Optional
 
 import pytest

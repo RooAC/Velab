@@ -18,7 +18,7 @@ import math
 import re
 from pathlib import Path
 from collections import Counter
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Tuple
 
 EMBED_INDEX_FORMAT_VERSION = 1
 _EMBED_INDEX_CACHE: Dict[str, dict[str, Any]] = {}

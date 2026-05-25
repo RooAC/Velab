@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Optional
 from uuid import UUID
 
 from log_pipeline.interfaces import ControllerType, ImportantEvent

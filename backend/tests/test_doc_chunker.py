@@ -1,9 +1,8 @@
 """Tests for DocumentChunker — three chunking strategies and edge cases."""
 from __future__ import annotations
 
-import pytest
 
-from services.doc_chunker import DocumentChunker, DocumentChunk
+from services.doc_chunker import DocumentChunker
 
 
 # ---------------------------------------------------------------------------

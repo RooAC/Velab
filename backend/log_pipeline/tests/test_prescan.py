@@ -84,12 +84,8 @@ def test_prescanner_text_file_collects_events(tmp_path: Path, classifier_yaml: P
 
 
 def test_prescanner_marks_unsynced_ranges(tmp_path: Path):
-    p = tmp_path / "kernel@2025-09-11_07-13-33.log"
-    # Construct with boot-time fake "01-01" prefix lines, then synced "09-11" lines
-    fake_year = "01-01 10:00:00.000000   1   1 I Tag: msg\n"
-    real_line = "09-11 12:00:00.000000   1   1 I Tag: msg\n"
-    # Need year 1970 to dip below MIN_VALID_TS — KernelLogcatDecoder uses filename year (2025).
-    # For this test: write a dmesg file (relative time 0..) which is well below MIN_VALID_TS.
+    # Construct a dmesg file (relative time 0..) which is well below MIN_VALID_TS,
+    # so the entire decoded range is marked as unsynced.
     p2 = tmp_path / "176_2025-09-10_14-44-01.log"
     p2.write_text(
         "[    0.000000] Booting Linux\n"

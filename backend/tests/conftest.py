@@ -5,7 +5,7 @@
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Generator
 
 import pytest
@@ -87,7 +87,7 @@ def sample_case(test_db: Session) -> Case:
         vehicle_model="Model X",
         issue_description="Test issue",
         status="active",
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
     test_db.add(case)
     test_db.commit()

@@ -52,7 +52,7 @@ export default function DocManagerButton() {
       const resp = await fetch("/api/docs", { cache: "no-store" });
       const body = await resp.json();
       setDocs(Array.isArray(body.items) ? body.items : []);
-    } catch (e) {
+    } catch {
       setError("加载文档列表失败");
     } finally {
       setLoading(false);

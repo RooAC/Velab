@@ -7,7 +7,6 @@ import pytest
 from services.evaluation import (
     DiagnosisEvaluator,
     EvalCase,
-    EvalResult,
     EvalReport,
 )
 

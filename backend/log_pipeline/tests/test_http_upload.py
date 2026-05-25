@@ -6,7 +6,6 @@ The IngestPipeline.run() is mocked out so tests don't need a real pipeline.
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import uuid4
 from unittest.mock import patch
 
 import pytest

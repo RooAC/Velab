@@ -10,7 +10,7 @@ import pytest
 
 openpyxl = pytest.importorskip("openpyxl")
 
-from services.doc_chunker import DocumentChunker
+from services.doc_chunker import DocumentChunker  # noqa: E402
 
 
 def _make_xlsx(tmp_path: Path) -> Path:

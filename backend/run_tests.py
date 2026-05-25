@@ -19,11 +19,11 @@ def main():
         "-p", "no:warnings",         # 禁用警告
         "--color=yes",               # 彩色输出
     ]
-    
+
     # 如果有命令行参数，添加到pytest参数中
     if len(sys.argv) > 1:
         args.extend(sys.argv[1:])
-    
+
     # 运行pytest
     exit_code = pytest.main(args)
     sys.exit(exit_code)

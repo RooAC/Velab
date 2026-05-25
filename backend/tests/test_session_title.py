@@ -5,7 +5,6 @@ warrants direct unit coverage, independent of the LLM call path.
 """
 from __future__ import annotations
 
-import pytest
 
 from api.session_title import (
     SessionTitleMessage,

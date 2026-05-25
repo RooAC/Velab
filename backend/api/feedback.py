@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -99,7 +99,7 @@ def submit_feedback(
         confidence=data.confidence,
         recommendations=data.recommendations,
         confirmed_by=data.confirmed_by,
-        confirmed_at=datetime.utcnow(),
+        confirmed_at=datetime.now(timezone.utc),
         confirmation_status=data.confirmation_status,
         engineer_notes=data.engineer_notes,
         evidence_log_ids=data.evidence_log_ids,

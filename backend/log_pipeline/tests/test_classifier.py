@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from log_pipeline.ingest.classifier import Classifier, _glob_to_regex
 from log_pipeline.interfaces import ControllerType

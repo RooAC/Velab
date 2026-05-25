@@ -80,7 +80,6 @@ class DecodeStage:
     ) -> dict[str, int]:
         files = self._catalog.list_files_by_bundle(bundle_id)
         counts: Counter[str] = Counter()
-        total = len(files)
         results = self._decode_all(files, progress_cb)
         for meta, res in zip(files, results):
             if res is None:

@@ -70,7 +70,7 @@ _SPECIFIC_HINT_RE = re.compile(
 )
 # ECU 名称、错误码、时间锐点
 _SPECIFIC_ANCHOR_RE = re.compile(
-    r"(icgm|mpu|ivi|mcu|ipk|tbox|t-?box|ecu|gw|网关|仪表|中控|娱乐|0x[0-9a-f]+|e\d{2,5}|err_?\d+|errno|\d{4}[-/]\d{1,2}[-/]\d{1,2}|今天|昨天|前天|上周|凌晨|上午|下午|晚上|几点|点钟)",
+    r"(icgm|mpu|ivi|mcu|ipk|tbox|t-?box|ecu|gw|网关|仪表|中控|娱乐|0x[0-9a-f]+|e\d{2,5}|err_?\d+|errno|\d{4}[-/]\d{1,2}[-/]\d{1,2}|今天|昨天|前天|上周|凌晨|上午|下午|晚上|几点|点钟)",  # noqa: E501
     re.IGNORECASE,
 )
 
@@ -146,7 +146,6 @@ _INTERNAL_LINE_HINTS = (
 _THINKING_UI_FALLBACK = (
     "已识别为寒暄或信息不足，未调用诊断 Agent；正在引导用户补充可诊断信息（现象、ECU、错误码或日志）。"
 )
-
 
 
 def _thinking_leaks_detected(text: str) -> bool:
@@ -353,7 +352,7 @@ async def orchestrate(
     """
     Main orchestration flow. Yields SSE events as dicts:
       {"type": "step_start"|"step_progress"|"step_complete"|"content_start"|"content_delta"|"content_complete"|"done", ...}
-    
+
     Args:
         bundle_id: 可选的日志包 ID。若传入则 LogAnalyticsAgent 会优先分析该 bundle 的真实日志。
                    如果未传入，则尝试从 conversation_history 中自动提取最近一条 upload_summary。
@@ -679,7 +678,7 @@ async def orchestrate(
         if len(agent_results) > 0 and "rca_synthesizer" in agent_names:
             synthesizer_step_num = 2 + len(tool_calls)
             synthesizer = registry.get("rca_synthesizer")
-            
+
             if synthesizer:
                 yield {
                     "type": "step_start",
@@ -690,22 +689,22 @@ async def orchestrate(
                         "statusText": "Synthesizing Root Cause Analysis...",
                     },
                 }
-                
+
                 try:
                     # Build context with agent_results + workspace_path
                     rca_context = {"agent_results": agent_results}
                     if workspace_path:
                         rca_context["workspace_path"] = workspace_path
-                    
+
                     synthesizer_result = await synthesizer.execute(
                         task=user_message,
                         keywords=None,
                         context=rca_context,
                     )
-                    
+
                     # Add synthesizer result to agent_results
                     agent_results.append(synthesizer_result)
-                    
+
                     yield {
                         "type": "step_complete",
                         "step": {
@@ -826,7 +825,6 @@ async def generate_final_response(
             "content": f"用户问题: {user_message}\n\n各 Agent 分析结果:\n{agent_context}\n\n引用来源:\n{source_text}",
         },
     ]
-
 
     try:
         accumulated = ""

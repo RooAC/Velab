@@ -17,7 +17,6 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import pytest_asyncio
 
 from agents.log_analytics import LogAnalyticsAgent
 
@@ -207,7 +206,10 @@ async def test_execute_with_bundle_id_calls_bundle_loader(agent: LogAnalyticsAge
     """execute() routes to _load_logs_from_bundle when context contains bundle_id."""
     with patch.object(agent, "_load_logs_from_bundle", return_value="bundle-log-content") as mock_bundle:
         with patch.object(agent, "_mock_analyze") as mock_analyze:
-            mock_analyze.return_value = MagicMock(success=True, confidence="high", summary="ok", detail="", sources=[], agent_name="log_analytics", display_name="Log Analytics Agent")
+            mock_analyze.return_value = MagicMock(
+                success=True, confidence="high", summary="ok", detail="", sources=[],
+                agent_name="log_analytics", display_name="Log Analytics Agent",
+            )
             with patch("agents.log_analytics.settings") as mock_settings:
                 mock_settings.AGENTS_USE_LLM = False
                 await agent.execute(
@@ -224,7 +226,10 @@ async def test_execute_without_bundle_id_calls_load_logs(agent: LogAnalyticsAgen
     """execute() falls back to _load_logs when no bundle_id in context."""
     with patch.object(agent, "_load_logs", return_value="mock-log-content") as mock_load:
         with patch.object(agent, "_mock_analyze") as mock_analyze:
-            mock_analyze.return_value = MagicMock(success=True, confidence="high", summary="ok", detail="", sources=[], agent_name="log_analytics", display_name="Log Analytics Agent")
+            mock_analyze.return_value = MagicMock(
+                success=True, confidence="high", summary="ok", detail="", sources=[],
+                agent_name="log_analytics", display_name="Log Analytics Agent",
+            )
             with patch("agents.log_analytics.settings") as mock_settings:
                 mock_settings.AGENTS_USE_LLM = False
                 await agent.execute(task="分析日志", context=None)
@@ -280,7 +285,7 @@ async def test_orchestrator_passes_bundle_id_to_agent_context() -> None:
 
     with p("agents.orchestrator.chat_completion") as mock_llm, \
          p("agents.orchestrator.parse_tool_calls") as mock_parse, \
-         p("agents.orchestrator.workspace_manager") as mock_ws, \
+         p("agents.orchestrator.workspace_manager"), \
          p("agents.orchestrator.settings") as mock_cfg, \
          p("agents.orchestrator.registry") as mock_reg:
 
@@ -304,4 +309,3 @@ async def test_orchestrator_passes_bundle_id_to_agent_context() -> None:
     # At least one context should carry the bundle_id
     assert any(ctx.get("bundle_id") == "bundle-xyz" for ctx in collected_contexts), \
         f"bundle_id not found in collected_contexts: {collected_contexts}"
-

@@ -26,12 +26,12 @@ from pathlib import Path
 # 保证 import 路径正确（从 backend/ 目录运行）
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from config import settings
-from services.vector_search import VectorSearchService
+from config import settings  # noqa: E402
+from services.vector_search import VectorSearchService  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,

@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Optional
 from uuid import UUID
 
 from log_pipeline.alignment.time_aligner import (

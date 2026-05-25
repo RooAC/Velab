@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -80,7 +80,7 @@ def upsert_session(
     session.turn_count = max(payload.turnCount, 0)
     if session.created_at is None:
         session.created_at = payload.createdAt
-    session.updated_at = payload.updatedAt or datetime.utcnow()
+    session.updated_at = payload.updatedAt or datetime.now(timezone.utc)
 
     db.query(ChatMessageRecord).filter_by(session_id=session_id).delete()
     for seq, message in enumerate(payload.messages):

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from log_pipeline.alignment.time_aligner import (
-    DIRECT_WINDOW_SEC,
-    SPARSE_WINDOW_SEC,
     _AnchorView,
     align_bundle,
     from_anchor_candidates,

@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
 from sqlalchemy import text
@@ -129,7 +129,7 @@ class SemanticCacheService:
         """
         query_hash = self._hash_query(query_text, scenario_id)
         ttl = ttl_hours if ttl_hours is not None else self.ttl_hours
-        expires_at = datetime.utcnow() + timedelta(hours=ttl) if ttl > 0 else None
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl) if ttl > 0 else None
 
         response_text = json.dumps(response_data, ensure_ascii=False)
 
