@@ -21,8 +21,13 @@
 ### Verified
 - 后端 `flake8 .` → **0 issues**；CI 严格模式（`E9,F63,F7,F82`）→ **0 issues**。
 - 后端 `pytest -q` → **444 passed**（无回归）。
-- 前端 `npm test -- --run` → **226 passed | 11 skipped**（11 个 skipped 为 FeedbackButtons + page.test 的预存 Vitest 定时器/SSE flaky 用例，独立追踪）。
+- 前端 `npm test -- --run` → **237 passed | 0 skipped**（11 个先前 skipped 用例全部修复并通过：FeedbackButtons 6 个改用 `fireEvent` + `vi.useFakeTimers` 同步驱动；page.test 5 个改用 `server.use(http.post('/api/chat', ...))` 覆盖 MSW handler，避免 `global.fetch = mockFetch` 被 MSW 拦截器旁路）。
 - 前端 `npm run lint` → 0 warnings；`npm audit` → 0 vulnerabilities。
+
+### Fixed
+- **11 个前端 `it.skip` 用例修复**（零技术债收尾）：
+  - `web/src/components/__tests__/FeedbackButtons.test.tsx`（6 个）：原跳过原因是 `userEvent.click` 在 React 19 + JSDOM 下因状态切换中途重渲染导致 10s 超时。改用同步 `fireEvent.click()` + `vi.useFakeTimers()/vi.advanceTimersByTime()` 推进 setTimeout，全部 22/22 通过。
+  - `web/src/app/__tests__/page.test.tsx`（5 个）：原跳过原因是 `global.fetch = mockFetch` 被 MSW `setupServer` 在 `beforeAll` 中安装的 undici 拦截器旁路，导致 `mockFetch.mockResolvedValue/mockImplementation` 永不命中 `/api/chat`。改用 `server.use(http.post('/api/chat', () => new HttpResponse(stream, ...)))` 在每个测试中覆盖 MSW handler，包括永不结束的 ReadableStream（Stop 按钮）、`HttpResponse.error()`（网络错误）、AbortError 抛出（AbortError 静默）、SSE 多事件流（assistant 渲染）、callCount 累计（多消息），全部 16/16 通过。
 
 ---
 

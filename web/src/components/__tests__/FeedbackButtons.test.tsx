@@ -4,7 +4,7 @@
  * 测试反馈按钮组件的交互和状态管理
  */
 
-import { render, screen, waitFor } from '@/__tests__/utils/test-utils'
+import { render, screen, waitFor, fireEvent, act } from '@/__tests__/utils/test-utils'
 import FeedbackButtons from '@/components/FeedbackButtons'
 import userEvent from '@testing-library/user-event'
 import { vi, describe, it, expect } from 'vitest'
@@ -71,86 +71,82 @@ describe('FeedbackButtons Component', () => {
             })
         })
 
-        it.skip('复制后应该在 2 秒后恢复', async () => {
-            // TODO: 修复 Vitest 定时器测试
+        it('复制后应该在 2 秒后恢复', async () => {
             vi.useFakeTimers()
-            const user = userEvent.setup({ delay: null })
+            try {
+                render(<FeedbackButtons />)
+                const copyButton = screen.getByTitle('Copy')
 
-            render(<FeedbackButtons />)
+                fireEvent.click(copyButton)
 
-            const copyButton = screen.getByTitle('Copy')
+                // 点击后立即显示勾选图标
+                expect(copyButton.querySelector('path[d="M3 7L6 10L11 4"]')).toBeInTheDocument()
 
-            await user.click(copyButton)
+                // 快进 2 秒
+                act(() => {
+                    vi.advanceTimersByTime(2000)
+                })
 
-            // 快进 2 秒
-            await vi.advanceTimersByTimeAsync(2000)
-
-            // 应该恢复原始图标
-            await waitFor(() => {
-                expect(copyButton).toBeInTheDocument()
-            })
-
-            vi.useRealTimers()
+                // 应该恢复原始图标（勾选 path 不再存在）
+                expect(copyButton.querySelector('path[d="M3 7L6 10L11 4"]')).not.toBeInTheDocument()
+            } finally {
+                vi.useRealTimers()
+            }
         })
     })
 
     describe('点赞/点踩功能', () => {
-        it.skip('点击点赞应该激活点赞状态', async () => {
-            const user = userEvent.setup()
+        it('点击点赞应该激活点赞状态', () => {
             render(<FeedbackButtons />)
 
             const likeButton = screen.getByTitle('Like')
 
-            await user.click(likeButton)
+            fireEvent.click(likeButton)
 
             // 点赞图标应该被填充
             const likedSvg = likeButton.querySelector('svg')
             expect(likedSvg).toHaveAttribute('fill', 'currentColor')
         })
 
-        it.skip('再次点击点赞应该取消点赞', async () => {
-            const user = userEvent.setup()
+        it('再次点击点赞应该取消点赞', () => {
             render(<FeedbackButtons />)
 
             const likeButton = screen.getByTitle('Like')
 
             // 第一次点击 - 激活
-            await user.click(likeButton)
-
+            fireEvent.click(likeButton)
             // 第二次点击 - 取消
-            await user.click(likeButton)
+            fireEvent.click(likeButton)
 
             const likedSvg = likeButton.querySelector('svg')
             expect(likedSvg).toHaveAttribute('fill', 'none')
         })
 
-        it.skip('点击点踩应该激活点踩状态', async () => {
-            const user = userEvent.setup()
+        it('点击点踩应该激活点踩状态', () => {
             render(<FeedbackButtons />)
 
             const dislikeButton = screen.getByTitle('Dislike')
 
-            await user.click(dislikeButton)
+            fireEvent.click(dislikeButton)
 
             // 点踩图标应该被填充
             const dislikedSvg = dislikeButton.querySelector('svg')
             expect(dislikedSvg).toHaveAttribute('fill', 'currentColor')
         })
 
-        it.skip('点赞和点踩应该互斥', async () => {
-            const user = userEvent.setup()
+        it('点赞和点踩应该互斥', () => {
             render(<FeedbackButtons />)
 
             const likeButton = screen.getByTitle('Like')
             const dislikeButton = screen.getByTitle('Dislike')
 
             // 先点赞
-            await user.click(likeButton)
+            fireEvent.click(likeButton)
             let likeSvg = likeButton.querySelector('svg')
             expect(likeSvg).toHaveAttribute('fill', 'currentColor')
 
             // 再点踩，点赞应该被取消
-            await user.click(dislikeButton)
+            fireEvent.click(dislikeButton)
             likeSvg = likeButton.querySelector('svg')
             const dislikeSvg = dislikeButton.querySelector('svg')
 
@@ -158,18 +154,16 @@ describe('FeedbackButtons Component', () => {
             expect(dislikeSvg).toHaveAttribute('fill', 'currentColor')
         })
 
-        it.skip('点踩后点赞应该取消点踩', async () => {
-            const user = userEvent.setup()
+        it('点踩后点赞应该取消点踩', () => {
             render(<FeedbackButtons />)
 
             const likeButton = screen.getByTitle('Like')
             const dislikeButton = screen.getByTitle('Dislike')
 
             // 先点踩
-            await user.click(dislikeButton)
-
+            fireEvent.click(dislikeButton)
             // 再点赞
-            await user.click(likeButton)
+            fireEvent.click(likeButton)
 
             const likeSvg = likeButton.querySelector('svg')
             const dislikeSvg = dislikeButton.querySelector('svg')
@@ -250,32 +244,27 @@ describe('FeedbackButtons Component', () => {
     })
 
     describe('边界情况', () => {
-        it('快速连续点击应该正常工作', async () => {
-            const user = userEvent.setup()
+        it('快速连续点击应该正常工作', () => {
             render(<FeedbackButtons />)
 
             const likeButton = screen.getByTitle('Like')
 
-            // 快速点击多次
-            await user.click(likeButton)
-            await user.click(likeButton)
-            await user.click(likeButton)
+            fireEvent.click(likeButton)
+            fireEvent.click(likeButton)
+            fireEvent.click(likeButton)
 
-            // 应该正常切换状态
             expect(likeButton).toBeInTheDocument()
         })
 
-        it('多个按钮同时操作应该独立工作', async () => {
-            const user = userEvent.setup()
+        it('多个按钮同时操作应该独立工作', () => {
             render(<FeedbackButtons />)
 
             const copyButton = screen.getByTitle('Copy')
             const likeButton = screen.getByTitle('Like')
 
-            await user.click(copyButton)
-            await user.click(likeButton)
+            fireEvent.click(copyButton)
+            fireEvent.click(likeButton)
 
-            // 两个按钮都应该正常工作
             expect(copyButton).toBeInTheDocument()
             expect(likeButton).toBeInTheDocument()
         })
