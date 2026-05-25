@@ -335,7 +335,13 @@ class VectorSearchService:
             ],
         }
         partial_path = path.with_suffix(path.suffix + ".partial")
-        partial_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        with open(partial_path, "w", encoding="utf-8") as out:
+            out.write(json.dumps(payload, ensure_ascii=False))
+            out.flush()
+            try:
+                os.fsync(out.fileno())
+            except OSError:
+                pass
         os.replace(partial_path, path)
         logger.info("Saved %d embedding vectors to %s", len(self._embed_vectors), path)
         return len(self._embed_vectors)

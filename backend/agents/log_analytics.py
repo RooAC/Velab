@@ -18,7 +18,9 @@ from config import settings
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "logs"
 
-# 每次从 bundle API 拉取日志的行数上限（避免超出 LLM 上下文窗口）
+# 每次从 bundle API 拉取日志的行数上限（avoid 超出 LLM 上下文窗口）。
+# 实际值优先取 settings.LOG_ANALYSIS_LIMIT，此处保留模块级常量作为兜底，
+# 以兼容旧测试与外部脚本直接 import 的场景。
 _BUNDLE_LOG_LIMIT = 2000
 # 精确时间点命中时，向前/向后各扩展的秒数（±2h 窗口）
 _TIME_HINT_WINDOW_SEC = 7200
@@ -262,42 +264,77 @@ class LogAnalyticsAgent(BaseAgent):
 
                 params: dict = {"limit": _BUNDLE_LOG_LIMIT, "start": t_start, "end": t_end}
 
-                log_resp = await client.get(url, params=params)
-                if log_resp.status_code != 200:
-                    log.warning("bundle logs API returned %d, falling back", log_resp.status_code)
-                    return self._load_logs(keywords)
+                # ── 自适应扩窗：关键词过滤命中过少时翻倍重拉，最多扩至 MAX_LIMIT ──
+                # 从 settings 读取（带兜底，便于测试 monkeypatch 模块级常量）
+                base_limit = getattr(settings, "LOG_ANALYSIS_LIMIT", _BUNDLE_LOG_LIMIT)
+                max_limit = getattr(settings, "LOG_ANALYSIS_MAX_LIMIT", 10000)
+                auto_expand = getattr(settings, "LOG_ANALYSIS_AUTO_EXPAND", True)
+                expand_threshold = getattr(settings, "LOG_ANALYSIS_EXPAND_THRESHOLD", 50)
+                # 无关键词场景使用更大的初始窗口，避免用户「分析下这台车」类请求遗漏关键事件
+                if not keywords:
+                    no_kw_limit = getattr(settings, "LOG_ANALYSIS_NO_KEYWORD_LIMIT", 5000)
+                    base_limit = min(no_kw_limit, max_limit)
+                params["limit"] = base_limit
 
-                # 在 with 块内捕获响应文本，确保连接已完成缓冲
-                raw_text = log_resp.text
+                lines: list[str] = []
+                expand_count = 0
+                current_limit = base_limit
+                raw_text = ""
 
-            # 解析 NDJSON 行并可选按关键词过滤
-            lines: list[str] = []
-            for raw_line in raw_text.splitlines():
-                raw_line = raw_line.strip()
-                if not raw_line:
-                    continue
-                try:
-                    record: dict = json.loads(raw_line)
-                except json.JSONDecodeError:
-                    continue
-                # 将结构化记录合并为可读文本行
-                ts = record.get("ts") or record.get("timestamp", "")
-                ctrl = record.get("controller", "")
-                msg = record.get("msg") or record.get("message", "")
-                level = record.get("level", "")
-                text_line = f"[{ts}][{ctrl}][{level}] {msg}".strip()
-                if keywords:
-                    low = text_line.lower()
-                    if not any(k.lower() in low for k in keywords):
+                while True:
+                    log_resp = await client.get(url, params=params)
+                    if log_resp.status_code != 200:
+                        log.warning("bundle logs API returned %d, falling back", log_resp.status_code)
+                        return self._load_logs(keywords)
+
+                    raw_text = log_resp.text
+
+                    # 解析 NDJSON + 关键词过滤
+                    lines = []
+                    for raw_line in raw_text.splitlines():
+                        raw_line = raw_line.strip()
+                        if not raw_line:
+                            continue
+                        try:
+                            record: dict = json.loads(raw_line)
+                        except json.JSONDecodeError:
+                            continue
+                        ts = record.get("ts") or record.get("timestamp", "")
+                        ctrl = record.get("controller", "")
+                        msg = record.get("msg") or record.get("message", "")
+                        level = record.get("level", "")
+                        text_line = f"[{ts}][{ctrl}][{level}] {msg}".strip()
+                        if keywords:
+                            low = text_line.lower()
+                            if not any(k.lower() in low for k in keywords):
+                                continue
+                        lines.append(text_line)
+
+                    # 扩窗条件：启用 + 有关键词过滤 + 命中过少 + 仍有上调空间
+                    if (
+                        auto_expand
+                        and keywords
+                        and len(lines) < expand_threshold
+                        and current_limit < max_limit
+                    ):
+                        next_limit = min(current_limit * 2, max_limit)
+                        log.info(
+                            "bundle %s expanding limit %d → %d (matched=%d < threshold=%d)",
+                            bundle_id, current_limit, next_limit, len(lines), expand_threshold,
+                        )
+                        current_limit = next_limit
+                        params["limit"] = current_limit
+                        expand_count += 1
                         continue
-                lines.append(text_line)
+                    break
 
             if not lines:
                 # 关键词过滤后无结果，fallback 到 mock
                 log.info("bundle %s has no lines matching keywords, falling back to data/logs/", bundle_id)
                 return self._load_logs(keywords)
 
-            header = f"=== bundle:{bundle_id} (lines={len(lines)}) ==="
+            header_extra = f", expanded x{expand_count}" if expand_count else ""
+            header = f"=== bundle:{bundle_id} (lines={len(lines)}, limit={current_limit}{header_extra}) ==="
             return header + "\n" + "\n".join(lines)
 
         except Exception as exc:

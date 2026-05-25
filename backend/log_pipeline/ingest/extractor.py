@@ -116,6 +116,9 @@ class Extractor:
         try:
             yield from self._extract_into(archive_path, work_dir, depth=0, source_archive=None)
         except Exception:
+            logger.exception(
+                "Extract failed: archive=%s work_dir=%s", archive_path, work_dir
+            )
             shutil.rmtree(work_dir, ignore_errors=True)
             raise
 

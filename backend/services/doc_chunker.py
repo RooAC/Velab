@@ -77,6 +77,8 @@ class DocumentChunker:
 
         if suffix == ".pdf":
             text = self._extract_pdf_text(file_path)
+        elif suffix in (".xlsx", ".xlsm"):
+            text = self._extract_xlsx_text(file_path)
         elif suffix in (".txt", ".md", ".log"):
             text = file_path.read_text(encoding="utf-8", errors="ignore")
         else:
@@ -170,7 +172,7 @@ class DocumentChunker:
             所有文件的切块列表
         """
         if extensions is None:
-            extensions = [".pdf", ".txt", ".md"]
+            extensions = [".pdf", ".txt", ".md", ".xlsx", ".xlsm"]
 
         all_chunks = []
         for f in sorted(dir_path.iterdir()):
@@ -288,6 +290,56 @@ class DocumentChunker:
             file_path,
         )
         return ""
+
+    # ── Excel 提取 ──
+
+    @staticmethod
+    def _extract_xlsx_text(file_path: Path) -> str:
+        """
+        提取 Excel 文本
+
+        使用 openpyxl 逐 sheet 逐行读取可读单元格，按 sheet 分隔、
+        按行拼接为制表符分隔的纯文本（便于后续 TF-IDF / embedding、切块）。
+
+        只处理可见 sheet，忽略公式、图表、图片。空单元格跳过；整行空跳过。
+        未安装 openpyxl 时平滑返回空串并警告。
+        """
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            logger.error(
+                "Cannot extract text from Excel %s: install openpyxl",
+                file_path,
+            )
+            return ""
+
+        try:
+            wb = load_workbook(file_path, read_only=True, data_only=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("openpyxl failed for %s: %s", file_path, exc)
+            return ""
+
+        try:
+            parts: List[str] = []
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                rows_text: List[str] = []
+                for row in ws.iter_rows(values_only=True):
+                    cells = [
+                        str(c).strip()
+                        for c in row
+                        if c is not None and str(c).strip()
+                    ]
+                    if cells:
+                        rows_text.append("\t".join(cells))
+                if rows_text:
+                    parts.append(f"## Sheet: {sheet_name}\n" + "\n".join(rows_text))
+            return "\n\n".join(parts)
+        finally:
+            try:
+                wb.close()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 # 全局单例

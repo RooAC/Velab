@@ -180,3 +180,65 @@
   3. `backend/.env` / `.env.example`：废弃 `ANTHROPIC_DEFAULT_MODEL`，新增三条分层注释
   4. `_pick_available_anthropic_model()` 降级列表：首位从 `ANTHROPIC_DEFAULT_MODEL` 改为 `ANTHROPIC_AGENT_MODEL`，并将 `claude-sonnet-4-6` 置于降级优先队首
 - **模型版本说明**：`claude-sonnet-4-6` 为 Anthropic 官方文档（2026-05-07）首推稳定 Sonnet，1M context，$3/$15 per MTok；4.6 起改用无日期格式作为 pinned snapshot
+### 2026-05-25: 第一次试用反馈批量修复（A1/A2/A3/R1/F2）
+- **A1/A2 元问题短路**（`backend/agents/orchestrator.py`）：路由层在调用 LLM 之前增加确定性正则前置过滤。新增 `_META_QUERY_PATTERNS`（覆盖"你是谁/什么模型/能做什么/版本/介绍一下/你好/在吗/hi"等）和 `_is_meta_query()`（长度 ≤30 + pattern 命中）；`orchestrate()` 顶部检测命中后直接 emit step_start/step_complete + `META_QUERY_REPLY`（友好自我介绍 "Velab FOTA 智能诊断助手"）+ `chain_debug.path="meta_shortcut"`，**不消耗 LLM token**。同时强化 `SYSTEM_PROMPT_TEMPLATE` "何时不要调用 Agent" 章节，明确"即使已有 bundle 上下文，也应先反问澄清"。
+- **A3 上传卡片溢出**（`web/src/components/UploadSummaryCard.tsx`）：外层 `<section>` className 追加 `min-w-0 max-w-full overflow-hidden`，修复窄视口下 EventDigest/Brush 横向溢出主气泡。
+- **R1 日志窗口自动扩展**（`backend/config.py` + `backend/agents/log_analytics.py`）：config 新增 4 个可调参数 `LOG_ANALYSIS_LIMIT=2000`、`LOG_ANALYSIS_MAX_LIMIT=10000`、`LOG_ANALYSIS_AUTO_EXPAND=True`、`LOG_ANALYSIS_EXPAND_THRESHOLD=50`。`_load_logs_from_bundle()` 改写为 `while True` 循环：若启用 auto_expand 且有关键词且命中行数 < 阈值且当前 limit < max → limit 翻倍，重新拉取，循环直至命中足够或触顶；header 改为 `=== bundle:{id} (lines=N, limit=L, expanded xK) ===`。
+- **F2 场景切换器特性开关**（`web/src/components/Header.tsx`）：新增 `NEXT_PUBLIC_SHOW_SCENARIO_SWITCHER` env 开关；默认（未设置）保持可见，设为 `false` 时下拉按钮替换为纯文本场景名，下拉面板也不再展开。向后兼容。
+- **F1（认证）+ F4（文档上传）暂缓**；**F3 已经在 2026-05-07 修复验证可用**。
+- **新增测试**：
+  - `backend/tests/test_orchestrator_meta_shortcut.py`（28 cases）：参数化 19 hit + 7 miss；monkeypatch `chat_completion` 验证元问题不触发 LLM、回复包含 "Velab FOTA 智能诊断助手"；非元问题路径仍调用 LLM。
+  - `backend/tests/test_log_analytics_auto_expand.py`（5 cases）：`_make_client_with_responses` 工厂构造 AsyncMock httpx client，覆盖 no_expand_above_threshold / expand_below_threshold / expand_stops_at_max / no_expand_when_disabled / no_expand_no_keywords。
+- **验证**：新增 33 用例全绿；既有 `test_log_analytics_bundle.py`（11）回归通过；Agent 层聚焦回归（meta_shortcut + bundle + auto_expand + rca_synthesizer + jira_knowledge + doc_retrieval）88+ 测试无失败；前端全量 `npm test -- --run` **209 passed | 11 skipped**（含 Header.test.tsx 21 个用例，确认 F2 未破坏现有交互）。
+
+### 2026-05-25 (晚): 二次审查批量加固（11 项）
+- **[BLOCKER] UUID 正则收紧**（3 处）：`backend/main.py` /chat 端点、`backend/agents/orchestrator.py:_UUID_RE`、`web/src/app/api/chat/route.ts` 的 `bundleId` 校验改为标准格式 `^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$`，禁止 dash 混用，缩小注入面。
+- **[BLOCKER] session-title 502 fallback**：`web/src/app/api/session-title/route.ts` 包裹 fetch 于 try/catch，后端不可达返回 502 + `{title:"新会话",error:"backend_unreachable"}`，防止 undefined 错误体被当成标题展示。
+- **[HIGH] extractor 异常诊断**：`backend/log_pipeline/ingest/extractor.py` `extract()` 异常处理改为 `logger.exception("Extract failed: archive=%s work_dir=%s", ...)` 再 rmtree+重抛。
+- **[HIGH] 前端轮询资源泄漏**：`web/src/app/page.tsx` bundle status 轮询副作用 for 循环改 try/catch/finally，捕获 fetch 异常 + finally 无条件清理 `resumedPollingKeysRef`。
+- **[MEDIUM] SSE 异常 emit**：`backend/main.py` `event_generator()` 包裹 try/except，异常时 emit `{type:"error","message":"诊断服务异常，请稍后重试"}` + `{type:"done"}`，避免前端永久 loading。
+- **[MEDIUM] workspace 原子写**：`services/workspace_manager.py` 新增模块级 `_atomic_write_text()`（`.partial + write + flush + fsync(OSError容忍) + os.replace`）；`create()` 三个模板写入和 `append()` 最终写入全部迁移到原子写。
+- **[MEDIUM] tool_functions 复用原子写**：`services/tool_functions.py` `update_todo_status()` 从 `services.workspace_manager` 延迟导入 `_atomic_write_text` 替换 `write_text`。
+- **[MEDIUM] 上传 `.partial` 清理**：`log_pipeline/api/http.py` upload_bundle 写入循环包裹 try/except，磁盘满/客户端断开/IO 异常时 `partial.unlink(missing_ok=True)` + `logger.exception` 并重抛，防止半成品文件堆积。
+- **[LOW] vector_search fsync**：`services/vector_search.py` `save_embed_index()` 从 `partial.write_text` 改为显式 `open+write+flush+fsync(OSError容忍)+os.replace`。
+- **[bugfix] `append()` workspace_dir 存在性校验**：`_atomic_write_text` 的 `mkdir(parents=True)` 副作用会让原本应失败的 `append(fake_ctx)` 静默成功；在 `append()` 入口新增 `ctx.workspace_dir.exists()` 前置校验恢复原契约（修复 `test_append_to_nonexistent_workspace`）。
+- **未实施（有意保留）**：① `backend/api/session_title.py` 已是 `except Exception + logger.exception` 设计；② extractor.py `rarfile` 延迟导入为可选依赖设计；③ route.ts `BACKEND_URL` 默认值由 systemd 注入。
+- **验证**：后端聚焦套件 **360 passed**（含 workspace_manager 17 + tool_functions + log_pipeline + jira/doc/rca/orchestrator/redaction/chain_log/semantic_cache/doc_chunker/evaluation/session_title）；前端全量 **209 passed | 11 skipped**；所有修改文件 `get_errors` 0 错误。
+
+### 2026-05-25 (深夜): PDF 试用反馈批量修复（AI首-2 + AI根-1）
+- **AI首-2 模糊提问澄清门控**：`backend/agents/orchestrator.py` 在 meta-query 短路后新增 `_is_vague_diagnosis_query()`（条件：长度 4–30 + 含泛化动词「检查/看看/分析/诊断」或泛化宾语「问题/情况/这台车」+ 未命中具体锚点 ECU/错误码/时间词/故障动词）+ `VAGUE_QUERY_REPLY`（5 段式补充信息引导）。命中 emit `chain_debug.path="vague_shortcut"`，不调 LLM。
+- **AI根-1 无关键词日志窗口加大**：`backend/config.py` 新增 `LOG_ANALYSIS_NO_KEYWORD_LIMIT: int = 5000`；`backend/agents/log_analytics.py` `_load_logs_from_bundle()` 当 keywords 为空时 base_limit 改为 `min(NO_KEYWORD_LIMIT, MAX_LIMIT)`。保留关键词模式的扩窗循环原行为。
+- **新增测试**：
+  - `backend/tests/test_orchestrator_vague_shortcut.py`（25 cases）：参数化 10 hit + 13 miss，端到端验证模糊提问不调 chat_completion、回复包含「故障现象」「ECU」、具体提问仍走 router。
+  - 更新 `test_log_analytics_auto_expand.py::test_no_expand_when_no_keywords`：断言 logs GET 携带 NO_KEYWORD_LIMIT；新增 `test_no_keyword_limit_capped_by_max`。
+  - 修正 `test_log_analytics_bundle.py::test_orchestrator_passes_bundle_id_to_agent_context`：原 "请分析日志" 被模糊门控拦截，改为 "请分析 iCGM 升级失败日志"。
+- **功-3 浏览器恢复**：代码审查 `web/src/app/page.tsx::restoreSessions()` 已实现 `localStorage preferredId → restored[0] 兜底` 恢复链，逻辑正确，本轮未改动。
+- **功-1 + 功-4 暂缓**（认证 / PDF·Excel 索引）。
+
+### 2026-05-26: 功-4 PDF/Excel 技术文档上传索引落地
+- **新依赖**：`pdfplumber==0.11.4` + `openpyxl==3.1.5`（及 transitives：pdfminer.six、pypdfium2、Pillow、cryptography、cffi、pycparser、et_xmlfile、charset-normalizer）已写入 `backend/requirements.txt`
+- **后端**：
+  - `services/doc_chunker.py`：`chunk_file()` 新增 `.xlsx/.xlsm` 路由；`chunk_directory()` 默认扩展名扩为 `[.pdf,.txt,.md,.xlsx,.xlsm]`；新增 `_extract_xlsx_text()`（`load_workbook(read_only=True,data_only=True)` + `iter_rows(values_only=True)`，按 sheet 拼接 `## Sheet: {name}` + Tab 分隔行，corrupted/ImportError → 空字符串）
+  - `api/docs.py`（**新增**，3 端点）：`POST /api/docs/upload`（流式 64KB 分块写 tempfile → 校验后缀/大小/非空 → SHA-256 取前 16 hex 作 doc_id → 内容去重 → `shutil.move` 到 `data/docs/uploaded/{doc_id}/{filename}` → 原子写 manifest.json → `BackgroundTasks` 触发 `_reindex_embeddings`）；`GET /api/docs`（按 uploaded_at desc 排序）；`DELETE /api/docs/{doc_id}`（UUID hex 校验 + rmtree + manifest 清理）。常量：`ALLOWED_SUFFIXES={.pdf,.xlsx,.xlsm,.txt,.md}`、`MAX_UPLOAD_SIZE=20MB`、`_SAFE_NAME_RE` 路径名净化（`Path.name` 取尾段 + 字符白名单替换，防遍历）
+  - `api/__init__.py`：挂载 `docs_router` 到 `/api/docs`
+  - `agents/doc_retrieval.py::_load_documents()`：递归扫描 `DOC_DIR/uploaded/` 下 PDF/Excel/文本，通过 `DocumentChunker.chunk_file()` 提取并按 `DOC_CHUNK_INLINE_THRESHOLD` 决定单条/多 chunk 入库；IO/OS 错误改为 `log.warning` 不再静默
+  - `_reindex_embeddings()`：仅当 `AGENTS_USE_EMBEDDINGS=true` + API Key 配齐时调用 `scripts.ingest_embeddings.ingest_docs(VectorSearchService(use_embeddings=True))` 增量重建 `data/indexes/tech_docs.json`；异常吞掉并 warning，不阻塞上传响应
+- **前端**：
+  - `app/api/docs/route.ts`：`GET` 透传后端列表（502 fallback 返回 `{items:[],error:"backend_unreachable"}`）；`POST` 校验 `file` 字段后 multipart 转发到 `/api/docs/upload`
+  - `app/api/docs/[docId]/route.ts`：`DELETE` 透传，docId 必须匹配 `^[0-9a-f]{16}$` 否则 400
+  - `components/DocManagerButton.tsx`（**新增**）：Header 右上角"📚 技术文档"按钮 + 弹出式对话框（外部点击关闭，accept=".pdf,.xlsx,.xlsm,.txt,.md"），含上传/列表/删除三态 UI；文件大小/时间格式化、错误展示、上传中 spinner
+  - `components/Header.tsx`：将 `<DocManagerButton/>` 插入到 "Sign up" 按钮左侧
+- **测试**：
+  - 后端：`tests/test_docs_api.py`（12）：上传成功 / 415 不支持后缀 / 400 空文件 / 400 缺 filename / 内容去重 / 路径遍历净化（`../../etc/passwd.txt`）/ 413 size limit / 列表空态 / 列表按 uploaded_at desc / 204 删除 / 404 unknown / 400 非法 hex。`tests/test_doc_chunker_xlsx.py`（4）：跨 sheet 提取 / chunk_file 路由 / 损坏 xlsx 返回空 / 跳过空行。**docs_client fixture 用 bare `FastAPI()` 仅挂 docs_router 隔离 main.app lifespan 的 PG 依赖**，monkeypatch `_reindex_embeddings` 为 async no-op
+  - 前端：`app/api/docs/__tests__/route.test.ts`（8）：GET 透传 / GET 502 fallback / POST 400 缺 file / POST 透传 / POST 502 / DELETE 400 非法 docId / DELETE 204 / DELETE 502
+- **回归**：后端核心受影响 102 passed（包含旧 chunker、orchestrator meta+vague、log_analytics auto_expand+bundle）；前端 **217 passed | 11 skipped**（+8）。`tests/test_doc_retrieval.py` 部分用例在 `AGENTS_USE_LLM=true` 环境下 hang（真实 chat_completion 调用），为预先存在问题，与本次改动无关。
+
+### 2026-05-26 (晚): 功-4 落地后批量加固
+- **[Fix #1] `test_doc_retrieval.py` LLM hang**：文件级 autouse fixture `_disable_llm_summarize` `monkeypatch.setattr(settings, "AGENTS_USE_LLM", False, raising=False)`，10/10 恢复 0.03s 通过
+- **[Fix #6] `doc_retrieval._load_documents()` 阻塞 event loop**：`execute()` 中改为 `await asyncio.to_thread(self._load_documents)`，PDF/Excel chunking 同步 I/O 不再阻塞 FastAPI worker；已验证现有 patch.object(sync return list) mock 与 `to_thread` 兼容
+- **[Fix #8] manifest.json 并发写竞态**：`api/docs.py` 模块级 `_MANIFEST_LOCK = threading.Lock()`，POST 上传与 DELETE 的 read-modify-write 全部包入 `with _MANIFEST_LOCK:`；单进程多并发上传安全（多 worker 部署需未来引入文件锁）
+- **[Fix #5] `DocManagerButton` 单元测试**：新增 `web/src/components/__tests__/DocManagerButton.test.tsx`（5 用例：初始仅渲染按钮、点击展开 + 列表、空态文案、加载失败提示、input.accept 包含全部支持后缀），`vi.stubGlobal("fetch", mockFetch)` 模拟 API
+- **文档同步**：CHANGELOG.md `[Unreleased]` 下追加 `[2026-05-26] · 功-4` 完整章节；`backend/README.md` 第 89/90 行将 `/api/docs`（PDF/Excel/TXT/MD 上传 + 列表 + 删除）写入平台业务层路由清单
+- **回归**：后端核心受影响 **112 passed**（+10 doc_retrieval 全量恢复），前端全量 **222 passed | 11 skipped**（+5 DocManagerButton）
+- **未实施（独立工作流）**：① `client` fixture PG 依赖整体改造；② 功-1 用户认证；③ embedding 默认开关业务决策；④ 全量 vs 增量 reindex 优化；⑤ requirements 分层 base/dev/optional；⑥ CI 集成 pdfplumber/openpyxl 实跑验证
+

@@ -110,13 +110,22 @@ async def upload_bundle(
     upload_path = settings.upload_root / f"{upload_id}__{Path(file.filename).name}"
     upload_path.parent.mkdir(parents=True, exist_ok=True)
     partial = upload_path.with_suffix(upload_path.suffix + ".partial")
-    with open(partial, "wb") as out:
-        while True:
-            chunk = await file.read(_UPLOAD_CHUNK)
-            if not chunk:
-                break
-            out.write(chunk)
-    partial.replace(upload_path)
+    try:
+        with open(partial, "wb") as out:
+            while True:
+                chunk = await file.read(_UPLOAD_CHUNK)
+                if not chunk:
+                    break
+                out.write(chunk)
+        partial.replace(upload_path)
+    except Exception:
+        # 客户端断开 / 磁盘满 / I/O 异常时清理半成品文件，避免堆积
+        logger.exception("upload write failed: filename=%s partial=%s", file.filename, partial)
+        try:
+            partial.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
     pipeline: IngestPipeline = request.app.state.pipeline
     bundle_id = pipeline.register_upload(upload_path, file.filename)

@@ -208,7 +208,8 @@ async def update_todo_status(
                 break
 
         if updated:
-            todo_path.write_text("\n".join(lines), encoding="utf-8")
+            from services.workspace_manager import _atomic_write_text
+            _atomic_write_text(todo_path, "\n".join(lines))
             return {"success": True, "item": item_text, "new_status": new_mark}
         else:
             return {"success": False, "item": item_text, "reason": "item_not_found_or_already_set"}

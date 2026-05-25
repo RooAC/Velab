@@ -6,6 +6,131 @@
 
 ## [Unreleased]
 
+_暂无未发布变更。_
+
+---
+
+## [2026-05-26 晚] · 功-4 落地后技术债批量清理
+
+### Added
+
+- **`api/docs.py` 多进程安全锁**：新增 `_manifest_lock()` 复合上下文管理器，组合 `threading.Lock` + `fcntl.flock(LOCK_EX)`（`_MANIFEST_LOCKFILE = data/docs/.manifest.lock` 哨兵文件），保护 manifest.json 在 Gunicorn `--workers>1` 多进程部署下并发上传不丢失记录；Windows 上 `fcntl` ImportError 自动降级为纯 `threading.Lock`
+- **文件类型 magic bytes 校验**：新增 `_validate_content_signature(path, suffix)`，PDF 校验 `%PDF-` / xlsx 校验 `PK\x03\x04` / txt-md 通过 utf-8/gbk 解码首 1KB；拒绝伪装后缀（如 `.pdf` 实为 plain text），上传错误码 `415 unsupported_format`
+- **embedding 状态机**：manifest 新增 `embedding_status` 字段，5 状态 `disabled` / `skipped_no_key` / `pending` / `ok` / `failed`；`_reindex_embeddings` 在 disabled/no_key/ok/failed 四路径均回写状态；前端 `DocManagerButton` 文档卡片渲染彩色徽标（TF-IDF / 无Key / 索引中 / 向量 / 失败）
+- **requirements 分层**：新增 `requirements-base.txt`（51 个运行时依赖）+ `requirements-dev.txt`（pytest 5 件套，以 `-r requirements-base.txt` 接入）；原 `requirements.txt` 保留不变，向后兼容 CI/deploy
+
+### Fixed
+
+- **`test_doc_retrieval.py` LLM hang**：文件级 autouse fixture `monkeypatch.setattr(settings, "AGENTS_USE_LLM", False, raising=False)`，10 用例从挂起 → 0.03s 通过
+- **`doc_retrieval._load_documents()` 阻塞 event loop**：`execute()` 改为 `await asyncio.to_thread(self._load_documents)`，PDF/Excel chunking 同步 I/O 不再阻塞 FastAPI worker
+- **`conftest.py::client` fixture PG 强依赖**：在 `TestClient(app)` 进入 lifespan 前 monkeypatch `db_manager.initialize/create_tables/close` + `tasks.client.get_task_client/close_task_client` + `vector_service.load_embed_index`，原本 ERROR 的 `test_feedback_api.py` 14 用例无需 PG 即可通过
+
+### Tests
+
+- 后端 `test_docs_api.py` +6（magic bytes 4 + embedding_status 2 = 18 passing）
+- 前端 `DocManagerButton.test.tsx` +4（上传成功+徽标 / 删除 confirm 接受 / confirm 拒绝 / 上传失败 detail = 9 passing）
+- 全量：后端 **444 passed**（从 350）/ 前端 **226 passed | 11 skipped**（从 222）
+
+### Notes
+
+未实施（架构/业务决策，留待独立工作流）：① 功-1 用户认证 & 多租户隔离；② embedding 默认开关（API 成本 vs 检索质量）；③ `_reindex_embeddings` 全量 → 增量（需 `VectorSearchService` 引入 doc_id 级 API）；④ Bundle 状态轮询 → SSE/WS；⑤ 统一异常处理中间件；⑥ data/ 目录清理策略；⑦ CI 实跑 pdfplumber/openpyxl。
+
+---
+
+## [2026-05-26] · 功-4 PDF/Excel 技术文档上传索引
+
+### Added
+
+- **后端 `POST /api/docs/upload` / `GET /api/docs` / `DELETE /api/docs/{doc_id}`**：支持 PDF / Excel(.xlsx/.xlsm) / TXT / Markdown 上传（20MB 上限），SHA-256 内容去重，路径遍历净化，原子写 manifest.json，`BackgroundTasks` 触发 embedding 增量重建（`AGENTS_USE_EMBEDDINGS=true` 时）
+- **`services/doc_chunker.py::_extract_xlsx_text()`**：openpyxl 读取多 sheet Excel，按 sheet 拼接 Tab 分隔行，损坏文件返回空字符串
+- **`agents/doc_retrieval.py::_load_documents()`**：递归扫描 `data/docs/uploaded/` 下 PDF/Excel/文本；调用包入 `asyncio.to_thread()` 避免阻塞 event loop
+- **`components/DocManagerButton.tsx`**：Header 上"📚 技术文档"按钮 + 弹窗式上传/列表/删除 UI
+- **新依赖**：`pdfplumber 0.11.4`、`openpyxl 3.1.5`（及 transitives）
+
+### Fixed
+
+- **`test_doc_retrieval.py` 在 `AGENTS_USE_LLM=true` 下 hang**：autouse fixture 关闭 LLM 调用，10 用例从挂起改为 0.03s 通过
+- **manifest.json 并发写竞态**：新增 `threading.Lock()` 串行化 read-modify-write
+- **`api/docs.py` UploadResponse `populate_by_name`**：迁移到 Pydantic v2 `ConfigDict`
+
+### Tests
+
+- 后端 +16：`test_docs_api.py`(12) + `test_doc_chunker_xlsx.py`(4)
+- 前端 +13：`api/docs/__tests__/route.test.ts`(8) + `components/__tests__/DocManagerButton.test.tsx`(5)
+- 全量：后端核心 112 passed / 前端 **222 passed | 11 skipped**
+
+---
+
+## [2026-05-25 深夜] · PDF 试用反馈批量修复（AI首-2 + AI根-1）
+
+### Added
+- **模糊提问澄清门控**（AI首-2，P0）：`backend/agents/orchestrator.py` 在 meta-query 短路之后新增 `_is_vague_diagnosis_query()` 检测器和 `VAGUE_QUERY_REPLY` 引导文案。命中条件需同时满足：长度 4–30 字 + 含泛化动词（检查/看看/分析/诊断）或泛化宾语（问题/情况/这台车） + 未命中任何具体锚点（ECU 名/错误码/时间词/具体故障动词）。命中时 emit `chain_debug.path="vague_shortcut"`，直接返回 5 段式补充信息引导（故障现象/ECU/时间/错误信息/是否完成），不调 LLM、不触发 Log Analytics 在零信息下空跑。
+- **无关键词日志窗口加大**（AI根-1，P0）：`backend/config.py` 新增 `LOG_ANALYSIS_NO_KEYWORD_LIMIT: int = 5000`。`backend/agents/log_analytics.py` `_load_logs_from_bundle()` 当 `keywords` 为空（用户粗粒度概览场景）时使用 `min(NO_KEYWORD_LIMIT, MAX_LIMIT)` 作为初始拉取窗口，避免「分析下这台车」类请求被困在 2000 行内遗漏关键事件。仍保持「关键词模式按 LOG_ANALYSIS_LIMIT 起步 + 阈值不足时翻倍扩窗」原行为。
+
+### Tests
+- 新增 `backend/tests/test_orchestrator_vague_shortcut.py`（25 cases）：参数化 10 hit（"检查下这台车的问题"等）+ 13 miss（含具体 ECU/错误码/时间词/meta query/短串/长描述）；端到端验证模糊提问不调 `chat_completion`、回复包含「故障现象」「ECU」、具体提问仍走正常 router。
+- 更新 `backend/tests/test_log_analytics_auto_expand.py`：扩充 `test_no_expand_when_no_keywords` 断言第二次 GET 携带 `LOG_ANALYSIS_NO_KEYWORD_LIMIT` 而非旧的 `LOG_ANALYSIS_LIMIT`；新增 `test_no_keyword_limit_capped_by_max` 验证 NO_KEYWORD_LIMIT 受 MAX_LIMIT 上限钳制。
+- 修正 `backend/tests/test_log_analytics_bundle.py::test_orchestrator_passes_bundle_id_to_agent_context`：原测试用 "请分析日志" 会被新模糊门控拦截，调整为 "请分析 iCGM 升级失败日志"（保留具体 ECU + 错误动词锚点）。
+
+### Notes
+- 功-3（重开浏览器默认在新会话）：经代码审查，`web/src/app/page.tsx` 的 `restoreSessions()` 已实现「localStorage preferredId → restored[0] 兜底」恢复链，逻辑正确；本轮不再修改，等待用户在最新构建上复现后再处理。
+- 功-1（用户登录/隔离）+ 功-4（PDF/Excel 索引）按原计划继续暂缓。
+
+---
+
+## [2026-05-25] · 二次审查批量加固
+
+### Security
+- **UUID 正则收紧**（BLOCKER）：`backend/main.py` `/chat` 端点、`backend/agents/orchestrator.py` `_UUID_RE`、`web/src/app/api/chat/route.ts` 三处 `bundleId` 校验正则从宽松的 `[0-9a-f]{8}-?...` 改为严格标准格式 `^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$`，禁止 dash 混用，缩小注入面。
+- **上传 `.partial` 文件清理**（MEDIUM）：`backend/log_pipeline/api/http.py` upload_bundle 的写入循环包裹 try/except，磁盘满/客户端断开/IO 异常时调用 `partial.unlink(missing_ok=True)` 并 `logger.exception` 记录上下文，防止半成品文件堆积。
+
+### Fixed
+- **session-title 502 fallback**（BLOCKER）：`web/src/app/api/session-title/route.ts` 包裹 fetch 于 try/catch，后端不可达时返回 502 + `{"title":"新会话","error":"backend_unreachable"}`，避免前端把未定义错误作为标题展示。
+- **SSE 异常事件 emit**（MEDIUM）：`backend/main.py` `event_generator()` 包裹 `async for event in orchestrate(...)` 于 try/except，捕获到异常时先 `log.exception` 再 emit `{"type":"error","message":"诊断服务异常，请稍后重试"}` 和 `{"type":"done"}`，保证前端不会卡在永久 loading。
+- **前端轮询资源泄漏**（HIGH）：`web/src/app/page.tsx` bundle status 轮询副作用的 `for` 循环改为 try/catch/finally 结构，捕获 fetch 异常并 `console.warn`，finally 中无条件清理 `resumedPollingKeysRef`，避免组件卸载或网络抖动导致 ref 残留。
+- **extractor 异常诊断信息缺失**（HIGH）：`backend/log_pipeline/ingest/extractor.py` `extract()` 异常处理改为 `logger.exception("Extract failed: archive=%s work_dir=%s", ...)` 后再 `rmtree` 并重抛，便于线上排障。
+- **workspace `append()` workspace_dir 不存在时静默成功**（bugfix）：原子写助手会 `mkdir(parents=True)` 自动创建父目录，导致 `append(fake_ctx, ...)` 不再返回 False。在 `append()` 入口新增 `ctx.workspace_dir.exists()` 前置校验恢复原契约。
+
+### Changed
+- **workspace 原子写入**（MEDIUM）：`backend/services/workspace_manager.py` 新增模块级 `_atomic_write_text()` 助手（`.partial + write + flush + fsync + os.replace`，fsync 失败容忍 OSError）；`create()` 中 focus/notes/todo 三个模板写入与 `append()` 的最终写入全部迁移到原子写。
+- **`update_todo_status` 复用原子写**（MEDIUM）：`backend/services/tool_functions.py` 从 `services.workspace_manager` 延迟导入 `_atomic_write_text` 替换原 `write_text`，防止进程崩溃时 todo.md 截断。
+- **embed index 写入加 fsync**（LOW）：`backend/services/vector_search.py` `save_embed_index()` 从 `partial.write_text` 改为显式 `open + write + flush + fsync(OSError 容忍) + os.replace`，与 workspace 写入保持一致的持久化保证。
+
+### Notes
+- 回归：后端聚焦套件 **360 passed**（含 workspace_manager 17、tool_functions、log_pipeline、jira/doc/rca/orchestrator/redaction/chain_log/semantic_cache/doc_chunker/evaluation/session_title）；前端全量 **209 passed | 11 skipped**。
+- 所有修改文件 `get_errors` 0 错误。
+- 未实施：`backend/api/session_title.py` 已是 `except Exception` + `logger.exception` 设计；`extractor.py` rarfile 延迟导入为可选依赖设计；`route.ts` `BACKEND_URL` 默认值由 systemd 注入，均为有意保留。
+
+---
+
+## [2026-05-25]
+
+### Added
+- **元问题确定性短路**（A1/A2）：`backend/agents/orchestrator.py` 在 LLM 路由前增加 `_META_QUERY_PATTERNS` 正则集与 `_is_meta_query()` 判定（长度 ≤30 + pattern 命中，覆盖"你是谁/什么模型/能做什么/版本/介绍一下/你好/在吗/hi"等）。命中后直接 emit `META_QUERY_REPLY`（"Velab FOTA 智能诊断助手"友好自我介绍）+ `chain_debug.path="meta_shortcut"`，**完全不消耗 LLM token**。
+- **日志窗口自动扩展**（R1）：`backend/config.py` 新增 4 个可调参数 `LOG_ANALYSIS_LIMIT=2000`、`LOG_ANALYSIS_MAX_LIMIT=10000`、`LOG_ANALYSIS_AUTO_EXPAND=True`、`LOG_ANALYSIS_EXPAND_THRESHOLD=50`。`LogAnalyticsAgent._load_logs_from_bundle()` 改为 `while True` 循环：当启用 auto_expand 且有关键词且命中行数 < 阈值且当前 limit < max 时，limit 翻倍重新拉取，直至命中足够或触顶。
+- **场景切换器特性开关**（F2）：`web/src/components/Header.tsx` 新增 `NEXT_PUBLIC_SHOW_SCENARIO_SWITCHER` 环境变量；设为 `false` 时下拉按钮替换为纯文本场景名，下拉面板不展开（默认未设置时保持可见，向后兼容）。
+- **新增测试**：
+  - `backend/tests/test_orchestrator_meta_shortcut.py`（28 cases）— 参数化 19 hit + 7 miss + 2 LLM 调用断言。
+  - `backend/tests/test_log_analytics_auto_expand.py`（5 cases）— 覆盖阈值上下、触顶、disabled、no_keywords 场景。
+
+### Fixed
+- **上传摘要卡窄视口溢出**（A3）：`web/src/components/UploadSummaryCard.tsx` 外层 `<section>` className 追加 `min-w-0 max-w-full overflow-hidden`，修复 EventDigest/Brush 在窄视口下横向溢出主气泡。
+
+### Changed
+- **`SYSTEM_PROMPT_TEMPLATE` 加固**：`orchestrator.py` 强化"何时不要调用 Agent"章节，明确即使已有 bundle 上下文，遇到模糊问题也应先反问澄清而非直接调用 Agent。
+
+### Deferred
+- **F1 认证体系**：本轮暂缓，纳入 Sprint 6 后续规划。
+- **F4 文档上传 UI**：本轮暂缓，纳入 Sprint 6 后续规划。
+
+### Notes
+- F3（模型分层路由）已在 [2026-05-07] 修复，本轮验证可用。
+- 验证：新增 33 用例全绿；既有 `test_log_analytics_bundle.py`（11）回归通过；Agent 层聚焦回归 88+ 测试无失败；前端全量 `npm test -- --run` **209 passed | 11 skipped**。
+
+---
+
+## [2026-05-23]
+
 ### Added
 - **Embedding 知识检索闭环**：`jira_knowledge` 与 `doc_retrieval` 现在支持 `AGENTS_USE_EMBEDDINGS=true` 时优先加载离线预计算索引（`backend/data/indexes/vector/`），启动时会预热 `jira_tickets.json` / `tech_docs.json`，并在 `AgentResult` / workspace notes 中透传 `retrieval_mode`（`embedding` / `tfidf` / `tfidf_fallback`）。
 - **预计算索引版本化**：`services/vector_search.py` 的索引文件新增 `version` 与 `items` 结构，并对格式进行读取校验，避免未来格式升级时静默失配。
@@ -14,7 +139,7 @@
 ### Fixed
 - **Scenario B 模型全部落到 Haiku**：`llm.py` 的 `_resolve_anthropic_model()` / `_resolve_openai_model()` 原将三个虚拟别名（`router-model`、`agent-model`、`synthesizer-model`）统一映射到同一个 `ANTHROPIC_DEFAULT_MODEL`（默认 `claude-haiku-4-5-20251001`），导致场景 B 直连模式下所有 Agent（含 RCA 根因分析）均跑 Haiku。
 - **`rca_synthesizer.py` 错用 `agent-model`**：`_llm_synthesize()` 中 `model="agent-model"` 改为 `model="synthesizer-model"`，确保 RCA 走 Synthesizer 层路由。
-- **Embedding 索引未被运行时消费**：`doc_retrieval.py` 之前始终走 TF-IDF，`jira_knowledge.py` 之前每次请求重复全量向量化，现已统一为“预计算索引优先 + 在线 embedding 兜底 + TF-IDF 回退”的生产链路。
+- **Embedding 索引未被运行时消费**：`doc_retrieval.py` 之前始终走 TF-IDF，`jira_knowledge.py` 之前每次请求重复全量向量化，现已统一为"预计算索引优先 + 在线 embedding 兜底 + TF-IDF 回退"的生产链路。
 - **前端 CI 分支覆盖率误计入测试辅助代码**：`vitest.config.ts` 排除 `src/__tests__/**`，避免 MSW handlers / 测试工具代码拉低全局 branch coverage，恢复 `branches >= 70%` 质量门槛的有效性。
 
 ### Changed

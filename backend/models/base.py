@@ -4,7 +4,7 @@ SQLAlchemy基础配置
 定义所有ORM模型的基类和通用配置
 """
 
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy import MetaData
 
 # 定义命名约定,确保索引和约束名称一致

@@ -298,7 +298,7 @@ async def test_orchestrator_passes_bundle_id_to_agent_context() -> None:
         ]
 
         events = []
-        async for ev in orchestrate("请分析日志", "fota-diagnostic", bundle_id="bundle-xyz"):
+        async for ev in orchestrate("请分析 iCGM 升级失败日志", "fota-diagnostic", bundle_id="bundle-xyz"):
             events.append(ev)
 
     # At least one context should carry the bundle_id

@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
     if (typeof bundleId !== "string" || bundleId.length > 36) {
       return new Response(JSON.stringify({ error: "bundleId must be a valid UUID string" }), { status: 400 });
     }
-    if (!/^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i.test(bundleId)) {
+    if (!/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(bundleId)) {
       return new Response(JSON.stringify({ error: "bundleId must be a valid UUID" }), { status: 400 });
     }
   }

@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -66,8 +67,8 @@ class DocRetrievalAgent(BaseAgent):
             task_preview=task[:120],
             keywords=(keywords or [])[:8],
         ):
-            # 加载文档库
-            documents = self._load_documents()
+            # 加载文档库（PDF/Excel 切块为同步 I/O，丢到线程池避免阻塞 event loop）
+            documents = await asyncio.to_thread(self._load_documents)
 
             if not documents:
                 result = AgentResult(
@@ -242,40 +243,74 @@ class DocRetrievalAgent(BaseAgent):
             except (json.JSONDecodeError, IOError):
                 pass
 
-        # 扫描 docs 目录中的文本文件，对大文档使用滑动窗口切块提升召回率
+        # 扫描 docs 目录中的文本/PDF/Excel 文件，对大文档使用滑动窗口切块提升召回率
         if DOC_DIR.exists():
             from services.doc_chunker import DocumentChunker
             chunker = DocumentChunker(
                 chunk_size=settings.DOC_CHUNK_SIZE,
                 chunk_overlap=settings.DOC_CHUNK_OVERLAP,
             )
+            scan_targets: list[Path] = []
+            # 顶层文本/Markdown
             for f in DOC_DIR.iterdir():
-                if f.suffix in (".txt", ".md"):
-                    try:
-                        content = f.read_text(encoding="utf-8", errors="ignore")
-                        if len(content) <= settings.DOC_CHUNK_INLINE_THRESHOLD:
-                            # 短文档直接作为单条记录
+                if f.is_file() and f.suffix.lower() in (".txt", ".md"):
+                    scan_targets.append(f)
+            # uploaded 子目录递归扫描所有支持类型
+            uploaded_root = DOC_DIR / "uploaded"
+            if uploaded_root.exists():
+                for f in uploaded_root.rglob("*"):
+                    if f.is_file() and f.suffix.lower() in (
+                        ".txt", ".md", ".pdf", ".xlsx", ".xlsm",
+                    ):
+                        scan_targets.append(f)
+
+            for f in scan_targets:
+                try:
+                    suffix = f.suffix.lower()
+                    if suffix in (".pdf", ".xlsx", ".xlsm"):
+                        # 复用 chunker 内置提取
+                        file_chunks = chunker.chunk_file(f)
+                        if not file_chunks:
+                            continue
+                        if len(file_chunks) == 1 and len(file_chunks[0].content) <= settings.DOC_CHUNK_INLINE_THRESHOLD:
+                            chunk = file_chunks[0]
                             docs.append({
                                 "title": f.stem,
-                                "content": content,
-                                "excerpt": content[:300],
+                                "content": chunk.content,
+                                "excerpt": chunk.content[:300],
                             })
                         else:
-                            # 大文档：滑动窗口切块，每块作为独立检索单元
-                            chunks = chunker.chunk_text(
-                                content,
-                                title=f.stem,
-                                doc_path=str(f),
-                                strategy="sliding_window",
-                            )
-                            for chunk in chunks:
+                            for chunk in file_chunks:
                                 docs.append({
                                     "title": f"{f.stem} [chunk {chunk.chunk_index + 1}/{chunk.total_chunks}]",
                                     "content": chunk.content,
                                     "excerpt": chunk.content[:300],
                                 })
-                    except IOError:
-                        pass
+                        continue
+
+                    # 文本类
+                    content = f.read_text(encoding="utf-8", errors="ignore")
+                    if len(content) <= settings.DOC_CHUNK_INLINE_THRESHOLD:
+                        docs.append({
+                            "title": f.stem,
+                            "content": content,
+                            "excerpt": content[:300],
+                        })
+                    else:
+                        chunks = chunker.chunk_text(
+                            content,
+                            title=f.stem,
+                            doc_path=str(f),
+                            strategy="sliding_window",
+                        )
+                        for chunk in chunks:
+                            docs.append({
+                                "title": f"{f.stem} [chunk {chunk.chunk_index + 1}/{chunk.total_chunks}]",
+                                "content": chunk.content,
+                                "excerpt": chunk.content[:300],
+                            })
+                except (IOError, OSError) as exc:
+                    log.warning("Failed to load doc %s: %s", f, exc)
 
         # 内置文档（保底）
         if not docs:

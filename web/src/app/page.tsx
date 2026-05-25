@@ -465,49 +465,55 @@ export default function Home() {
 
           void (async () => {
             let terminal = false;
-            for (let i = 0; i < MAX_STATUS_POLL_SECONDS; i += 1) {
-              if (i > 0) {
-                await new Promise((r) => setTimeout(r, 1000));
-              }
-              const resp = await fetch(`/api/bundle-status/${encodeURIComponent(file.bundleId!)}`);
-              let payload: Record<string, unknown> = {};
-              try {
-                payload = (await resp.json()) as Record<string, unknown>;
-              } catch {
-                payload = {};
-              }
-              if (!resp.ok) {
-                continue;
-              }
-              const status = String(payload?.status ?? "running");
-              const progress = typeof payload?.progress === "number" ? payload.progress : 0;
-              const stageLabel = getBundleStageLabel(status);
-              patchUploadFileProgress(
-                session.id,
-                message.id,
-                file.fileName,
-                {
-                  status: status === "done" ? "completed" : status === "failed" ? "failed" : "processing",
-                  percent: Math.max(8, Math.round(progress * 100)),
-                  stage: stageLabel,
-                  message: stageLabel,
-                  bundleId: file.bundleId,
-                  ...(status === "failed"
-                    ? { error: String(payload?.error || "未知错误") }
-                    : {}),
-                },
-                {
-                  stage: `${file.fileName} - ${stageLabel}`,
-                  message: `${file.fileName} - ${stageLabel}`,
+            try {
+              for (let i = 0; i < MAX_STATUS_POLL_SECONDS; i += 1) {
+                if (i > 0) {
+                  await new Promise((r) => setTimeout(r, 1000));
                 }
-              );
-              if (status === "done" || status === "failed") {
-                terminal = true;
-                break;
+                const resp = await fetch(`/api/bundle-status/${encodeURIComponent(file.bundleId!)}`);
+                let payload: Record<string, unknown> = {};
+                try {
+                  payload = (await resp.json()) as Record<string, unknown>;
+                } catch {
+                  payload = {};
+                }
+                if (!resp.ok) {
+                  continue;
+                }
+                const status = String(payload?.status ?? "running");
+                const progress = typeof payload?.progress === "number" ? payload.progress : 0;
+                const stageLabel = getBundleStageLabel(status);
+                patchUploadFileProgress(
+                  session.id,
+                  message.id,
+                  file.fileName,
+                  {
+                    status: status === "done" ? "completed" : status === "failed" ? "failed" : "processing",
+                    percent: Math.max(8, Math.round(progress * 100)),
+                    stage: stageLabel,
+                    message: stageLabel,
+                    bundleId: file.bundleId,
+                    ...(status === "failed"
+                      ? { error: String(payload?.error || "未知错误") }
+                      : {}),
+                  },
+                  {
+                    stage: `${file.fileName} - ${stageLabel}`,
+                    message: `${file.fileName} - ${stageLabel}`,
+                  }
+                );
+                if (status === "done" || status === "failed") {
+                  terminal = true;
+                  break;
+                }
               }
-            }
-            if (!terminal) {
-              resumedPollingKeysRef.current.delete(resumeKey);
+            } catch (err) {
+              // 轮询意外中断（网络 / 组件卸载）不应静默吞没
+              console.warn("bundle status poll aborted:", err);
+            } finally {
+              if (!terminal) {
+                resumedPollingKeysRef.current.delete(resumeKey);
+              }
             }
           })();
         });

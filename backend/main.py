@@ -195,11 +195,12 @@ async def chat(request: Request):
     bundle_id_raw: str | None = body.get("bundleId") or None
 
     # 在 API 边界验证 bundle_id 格式（防止路径注入 / SSRF）
+    # 仅接受规范 UUID：要么 32 位纯 hex，要么标准 8-4-4-4-12 分隔形式
     bundle_id: str | None = None
     if bundle_id_raw is not None:
         import re as _re
         if not _re.fullmatch(
-            r"[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}",
+            r"[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
             bundle_id_raw, _re.IGNORECASE
         ):
             from fastapi.responses import JSONResponse
@@ -225,6 +226,16 @@ async def chat(request: Request):
             async for event in orchestrate(user_message, scenario_id, history, bundle_id):
                 event_count += 1
                 yield {"data": json.dumps(event, ensure_ascii=False)}
+        except Exception as exc:
+            # 捕获 orchestrate 内部未处理异常，以 SSE error 事件平滑告知前端，避免连接静默断开
+            log.exception("orchestrate failed: %s", exc)
+            yield {
+                "data": json.dumps(
+                    {"type": "error", "message": "诊断服务异常，请稍后重试"},
+                    ensure_ascii=False,
+                )
+            }
+            yield {"data": json.dumps({"type": "done"}, ensure_ascii=False)}
         finally:
             # 记录请求完成日志
             chain_debug(
