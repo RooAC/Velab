@@ -18,7 +18,7 @@ import math
 import re
 from pathlib import Path
 from collections import Counter
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Tuple
 
 EMBED_INDEX_FORMAT_VERSION = 1
 _EMBED_INDEX_CACHE: Dict[str, dict[str, Any]] = {}
@@ -335,7 +335,13 @@ class VectorSearchService:
             ],
         }
         partial_path = path.with_suffix(path.suffix + ".partial")
-        partial_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        with open(partial_path, "w", encoding="utf-8") as out:
+            out.write(json.dumps(payload, ensure_ascii=False))
+            out.flush()
+            try:
+                os.fsync(out.fileno())
+            except OSError:
+                pass
         os.replace(partial_path, path)
         logger.info("Saved %d embedding vectors to %s", len(self._embed_vectors), path)
         return len(self._embed_vectors)

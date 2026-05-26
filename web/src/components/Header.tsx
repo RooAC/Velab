@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { DemoScenario, DEMO_SCENARIOS } from "@/lib/types";
+import DocManagerButton from "./DocManagerButton";
 
 interface HeaderProps {
   currentScenario: DemoScenario;
@@ -14,6 +15,13 @@ export default function Header({
 }: HeaderProps) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // F2: 场景切换器仅在 Demo 模式下展示。生产模式下静态显示当前场景名，
+  // 避免向真实用户暴露内部 Demo 列表（"Fleet Data Analytics Demo" 等无意义项）。
+  // 默认 true（向后兼容），设 NEXT_PUBLIC_SHOW_SCENARIO_SWITCHER=false 隐藏。
+  const showSwitcher =
+    (process.env.NEXT_PUBLIC_SHOW_SCENARIO_SWITCHER ?? "true").toLowerCase() !==
+    "false";
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -40,26 +48,35 @@ export default function Header({
         </div>
 
         <div className="relative">
-          <button
-            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className="flex items-center gap-2 text-sm font-medium hover:opacity-80 transition-opacity cursor-pointer"
-            style={{ color: "var(--text-primary)" }}
-          >
-            {currentScenario.name}
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 12 12"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              className={`transition-transform ${isDropdownOpen ? "rotate-180" : ""}`}
+          {showSwitcher ? (
+            <button
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className="flex items-center gap-2 text-sm font-medium hover:opacity-80 transition-opacity cursor-pointer"
+              style={{ color: "var(--text-primary)" }}
             >
-              <path d="M3 4.5L6 7.5L9 4.5" />
-            </svg>
-          </button>
+              {currentScenario.name}
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className={`transition-transform ${isDropdownOpen ? "rotate-180" : ""}`}
+              >
+                <path d="M3 4.5L6 7.5L9 4.5" />
+              </svg>
+            </button>
+          ) : (
+            <span
+              className="text-sm font-medium"
+              style={{ color: "var(--text-primary)" }}
+            >
+              {currentScenario.name}
+            </span>
+          )}
 
-          {isDropdownOpen && (
+          {showSwitcher && isDropdownOpen && (
             <div
               className="absolute top-full left-0 mt-2 w-80 rounded-lg border shadow-xl py-1 animate-fade-in"
               style={{
@@ -112,6 +129,7 @@ export default function Header({
       </div>
 
       <div className="flex items-center gap-3">
+        <DocManagerButton />
         <button
           className="text-sm px-3 py-1.5 rounded-md hover:opacity-80 transition-opacity cursor-pointer"
           style={{ color: "var(--text-secondary)" }}

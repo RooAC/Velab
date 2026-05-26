@@ -19,7 +19,6 @@ import tarfile
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 
 # 测试用的临时工作区基目录
 TEST_BASE_DIR = Path(__file__).parent.parent / "data" / "_test_workspaces"

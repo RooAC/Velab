@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -32,6 +33,23 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BASE_DIR = Path(__file__).resolve().parent.parent / "data" / "workspaces"
 _DEFAULT_ARCHIVE_DIR = Path(__file__).resolve().parent.parent / "data" / "workspaces_archive"
 _DEFAULT_MAX_SIZE_MB = 1024  # 总容量上限 1GB
+
+
+def _atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
+    """Write text via ``.partial`` + ``os.replace`` so partial writes never
+    corrupt the destination file (e.g. on crash, disk-full, or permission flip).
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_suffix(path.suffix + ".partial")
+    with open(partial, "w", encoding=encoding) as out:
+        out.write(content)
+        out.flush()
+        try:
+            os.fsync(out.fileno())
+        except OSError:
+            # fsync may not be supported on every fs (e.g. some tmpfs / network mounts).
+            pass
+    os.replace(partial, path)
 
 
 @dataclass
@@ -164,24 +182,18 @@ class WorkspaceManager:
             from datetime import datetime, timezone
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-            # 初始化模板文件
-            (workspace_dir / "focus.md").write_text(
+            # 初始化模板文件（原子写入）
+            _atomic_write_text(
+                workspace_dir / "focus.md",
                 _FOCUS_TEMPLATE.format(
                     user_query=user_query or "(未提供)",
                     scenario_id=scenario_id or "(未指定)",
                     task_id=task_id,
                     timestamp=timestamp,
                 ),
-                encoding="utf-8",
             )
-            (workspace_dir / "notes.md").write_text(
-                _NOTES_TEMPLATE,
-                encoding="utf-8",
-            )
-            (workspace_dir / "todo.md").write_text(
-                _TODO_TEMPLATE,
-                encoding="utf-8",
-            )
+            _atomic_write_text(workspace_dir / "notes.md", _NOTES_TEMPLATE)
+            _atomic_write_text(workspace_dir / "todo.md", _TODO_TEMPLATE)
 
             ctx = WorkspaceContext(task_id=task_id, workspace_dir=workspace_dir)
             self._workspaces[task_id] = ctx
@@ -218,6 +230,12 @@ class WorkspaceManager:
             bool: 是否写入成功
         """
         try:
+            if not ctx.workspace_dir.exists():
+                logger.warning(
+                    "Workspace append failed: workspace_dir not found: %s", ctx.workspace_dir
+                )
+                return False
+
             file_path = ctx.workspace_dir / filename
             lock = ctx._get_lock(filename)
 
@@ -250,7 +268,7 @@ class WorkspaceManager:
                 else:
                     updated = existing + section_content
 
-                file_path.write_text(updated, encoding="utf-8")
+                _atomic_write_text(file_path, updated)
 
             return True
 

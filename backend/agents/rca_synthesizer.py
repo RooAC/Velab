@@ -43,14 +43,14 @@ class RCASynthesizerAgent(BaseAgent):
     )
 
     async def execute(
-        self, 
-        task: str, 
-        keywords: list[str] | None = None, 
+        self,
+        task: str,
+        keywords: list[str] | None = None,
         context: dict | None = None
     ) -> AgentResult:
         """
         Synthesize RCA from multiple agent results.
-        
+
         Args:
             task: User's diagnostic query
             keywords: Extracted keywords
@@ -65,7 +65,7 @@ class RCASynthesizerAgent(BaseAgent):
             agent_results: List[AgentResult] = []
             if context and "agent_results" in context:
                 agent_results = context["agent_results"]
-            
+
             if not agent_results:
                 return AgentResult(
                     agent_name=self.name,
@@ -76,7 +76,7 @@ class RCASynthesizerAgent(BaseAgent):
                     detail="没有收到其他Agent的分析结果，无法进行综合分析。",
                     sources=[],
                 )
-            
+
             # Read workspace notes for supplementary context
             workspace_notes = self._read_workspace_notes(context)
 
@@ -89,7 +89,7 @@ class RCASynthesizerAgent(BaseAgent):
 
             # Fallback: rule-based synthesis
             return self._synthesize_results(task, agent_results, workspace_notes)
-    
+
     async def _llm_synthesize(self, task: str, agent_results: List[AgentResult], workspace_notes: str) -> AgentResult:
         """Use LLM to generate authoritative RCA from all agent results."""
         from services.llm import chat_completion
@@ -176,13 +176,13 @@ class RCASynthesizerAgent(BaseAgent):
         except Exception as e:
             log.warning("Failed to read workspace notes: %s", e)
         return ""
-    
+
     def _synthesize_results(self, task: str, agent_results: List[AgentResult], workspace_notes: str = "") -> AgentResult:
         """Synthesize multiple agent results into a comprehensive RCA."""
-        
+
         # Collect successful results
         successful_results = [r for r in agent_results if r.success]
-        
+
         if not successful_results:
             return AgentResult(
                 agent_name=self.name,
@@ -196,19 +196,19 @@ class RCASynthesizerAgent(BaseAgent):
                        "3. 补充ECU名称、错误码等关键信息",
                 sources=[],
             )
-        
+
         # Calculate overall confidence
         confidence = self._calculate_confidence(successful_results)
-        
+
         # Build comprehensive analysis
         detail_parts = []
         all_sources = []
-        
+
         # Add executive summary
         detail_parts.append("## 🎯 诊断结论\n")
         detail_parts.append(self._generate_executive_summary(successful_results))
         detail_parts.append("\n")
-        
+
         # Add detailed analysis from each agent
         detail_parts.append("## 📊 详细分析\n")
         for result in successful_results:
@@ -217,18 +217,18 @@ class RCASynthesizerAgent(BaseAgent):
             detail_parts.append(f"**摘要**: {result.summary}\n\n")
             detail_parts.append(result.detail)
             detail_parts.append("\n\n")
-            
+
             # Collect sources
             if result.sources:
                 all_sources.extend(result.sources)
-        
+
         # Add recommendations
         detail_parts.append("## 💡 修复建议\n")
         detail_parts.append(self._generate_recommendations(successful_results))
-        
+
         # Validate citation references
         citation_warnings = self._validate_citations(all_sources, successful_results)
-        
+
         # Add evidence references
         if all_sources:
             detail_parts.append("\n\n## 📚 证据来源\n")
@@ -236,12 +236,12 @@ class RCASynthesizerAgent(BaseAgent):
                 source_type = source.get("type", "unknown")
                 title = source.get("title", "未知来源")
                 detail_parts.append(f"{idx}. [{source_type.upper()}] {title}\n")
-        
+
         if citation_warnings:
             detail_parts.append("\n\n> ⚠️ **引用校验提示**\n")
             for w in citation_warnings:
                 detail_parts.append(f"> - {w}\n")
-        
+
         return AgentResult(
             agent_name=self.name,
             display_name=self.display_name,
@@ -257,18 +257,18 @@ class RCASynthesizerAgent(BaseAgent):
                 "citation_warnings": citation_warnings,
             }
         )
-    
+
     def _calculate_confidence(self, results: List[AgentResult]) -> str:
         """Calculate overall confidence based on individual agent confidences."""
         if not results:
             return "low"
-        
+
         # Map confidence levels to scores
         confidence_map = {"high": 3, "medium": 2, "low": 1}
-        
+
         scores = [confidence_map.get(r.confidence, 1) for r in results]
         avg_score = sum(scores) / len(scores)
-        
+
         # Convert back to confidence level
         if avg_score >= 2.5:
             return "high"
@@ -276,11 +276,11 @@ class RCASynthesizerAgent(BaseAgent):
             return "medium"
         else:
             return "low"
-    
+
     def _generate_executive_summary(self, results: List[AgentResult]) -> str:
         """Generate executive summary from agent results."""
         summaries = []
-        
+
         for result in results:
             if result.agent_name == "log_analytics":
                 summaries.append(f"**日志分析**: {result.summary}")
@@ -288,20 +288,20 @@ class RCASynthesizerAgent(BaseAgent):
                 summaries.append(f"**历史案例**: {result.summary}")
             else:
                 summaries.append(f"**{result.display_name}**: {result.summary}")
-        
+
         if not summaries:
             return "未能生成诊断结论。"
-        
+
         return "\n".join(summaries)
-    
+
     def _generate_recommendations(self, results: List[AgentResult]) -> str:
         """Generate actionable recommendations based on analysis."""
         recommendations = []
-        
+
         # Extract recommendations from agent results
         for result in results:
             detail_lower = result.detail.lower()
-            
+
             # Look for common patterns in analysis
             if "校验失败" in result.detail or "verify" in detail_lower:
                 recommendations.append(
@@ -310,7 +310,7 @@ class RCASynthesizerAgent(BaseAgent):
                     "   - 实现校验失败后的自动回退机制\n"
                     "   - 增强文件完整性检查(MD5/SHA256)"
                 )
-            
+
             if "死循环" in result.detail or "循环" in result.detail:
                 recommendations.append(
                     "2. **状态机保护机制**\n"
@@ -318,7 +318,7 @@ class RCASynthesizerAgent(BaseAgent):
                     "   - 实现异常状态的自动退出机制\n"
                     "   - 增加状态转换日志记录"
                 )
-            
+
             if "ecu" in detail_lower or "刷写" in result.detail:
                 recommendations.append(
                     "3. **ECU刷写流程优化**\n"
@@ -326,7 +326,7 @@ class RCASynthesizerAgent(BaseAgent):
                     "   - 增加独立的超时保护机制\n"
                     "   - 实现刷写失败的回退策略"
                 )
-        
+
         # Add generic recommendations if none found
         if not recommendations:
             recommendations.append(
@@ -334,7 +334,7 @@ class RCASynthesizerAgent(BaseAgent):
                 "2. 检查系统配置和环境参数\n"
                 "3. 参考历史类似案例的修复方案"
             )
-        
+
         return "\n\n".join(recommendations)
 
     @staticmethod

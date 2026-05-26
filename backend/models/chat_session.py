@@ -6,7 +6,7 @@
 - chat_messages
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -33,12 +33,12 @@ class ChatSession(Base):
     title_source = Column(String(32), nullable=False, default="default")
     title_auto_optimized = Column(Boolean, nullable=False, default=False)
     turn_count = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
     updated_at = Column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
         index=True,
     )
 
@@ -67,6 +67,6 @@ class ChatMessageRecord(Base):
     )
     seq = Column(Integer, nullable=False)
     payload = Column(JSON, nullable=False, default=dict)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
 
     session = relationship("ChatSession", back_populates="messages")

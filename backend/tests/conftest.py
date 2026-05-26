@@ -5,7 +5,7 @@
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Generator
 
 import pytest
@@ -45,9 +45,33 @@ def test_db() -> Generator[Session, None, None]:
 
 
 @pytest.fixture(scope="function")
-def client(test_db: Session) -> TestClient:
+def client(test_db: Session, monkeypatch) -> TestClient:
+    """提供绑定 SQLite 的 TestClient，并在 lifespan 中屏蔽真实 PG/Redis/embedding 依赖。"""
     def override_get_db():
         yield test_db
+
+    # 屏蔽 lifespan 中对真实 PostgreSQL / Redis / embedding 索引的依赖
+    import database as _database_module
+    import main as _main_module
+
+    monkeypatch.setattr(_database_module.db_manager, "initialize", lambda: None)
+    monkeypatch.setattr(_database_module.db_manager, "create_tables", lambda: None)
+    monkeypatch.setattr(_database_module.db_manager, "close", lambda: None)
+
+    async def _noop_async() -> None:
+        return None
+
+    # tasks.client 是延迟导入，需 patch 模块属性
+    import tasks.client as _tasks_client
+
+    monkeypatch.setattr(_tasks_client, "get_task_client", _noop_async)
+    monkeypatch.setattr(_tasks_client, "close_task_client", _noop_async)
+
+    # log_pipeline 状态初始化使用真实磁盘路径（tmp 无关），保留；
+    # 但 embedding 预热可能联网，禁用之
+    monkeypatch.setattr(
+        _main_module.vector_service, "load_embed_index", lambda _p: 0
+    )
 
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as test_client:
@@ -63,7 +87,7 @@ def sample_case(test_db: Session) -> Case:
         vehicle_model="Model X",
         issue_description="Test issue",
         status="active",
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
     test_db.add(case)
     test_db.commit()

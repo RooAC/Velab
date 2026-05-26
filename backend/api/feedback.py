@@ -12,11 +12,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -58,8 +58,7 @@ class DiagnosisFeedbackResponse(BaseModel):
     created_at: datetime
     metadata: Dict[str, Any] = Field(default_factory=dict, validation_alias="meta_data")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FeedbackStats(BaseModel):
@@ -100,7 +99,7 @@ def submit_feedback(
         confidence=data.confidence,
         recommendations=data.recommendations,
         confirmed_by=data.confirmed_by,
-        confirmed_at=datetime.utcnow(),
+        confirmed_at=datetime.now(timezone.utc),
         confirmation_status=data.confirmation_status,
         engineer_notes=data.engineer_notes,
         evidence_log_ids=data.evidence_log_ids,

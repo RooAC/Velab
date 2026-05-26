@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 class TaskClient:
     """
     异步任务客户端
-    
+
     提供任务提交、查询、取消等操作的封装接口。
     """
-    
+
     def __init__(self):
         """初始化任务客户端"""
         self._pool: Optional[ArqRedis] = None
@@ -31,20 +31,20 @@ class TaskClient:
             host=settings.REDIS_HOST,
             port=settings.REDIS_PORT,
         )
-    
+
     async def initialize(self):
         """初始化 Redis 连接池"""
         if self._pool is None:
             self._pool = await create_pool(self._redis_settings)
             logger.info("任务客户端已初始化")
-    
+
     async def close(self):
         """关闭 Redis 连接池"""
         if self._pool:
             await self._pool.close()
             self._pool = None
             logger.info("任务客户端已关闭")
-    
+
     async def submit_bundle_task(
         self,
         case_id: str,
@@ -74,20 +74,20 @@ class TaskClient:
         )
         logger.info(f"已提交压缩包解析任务: {task_id}, Case: {case_id}, File: {upload_name}")
         return task_id
-    
+
     async def get_task_status(self, task_id: str) -> dict:
         """
         查询任务状态
-        
+
         Args:
             task_id: 任务ID
-        
+
         Returns:
             dict: 任务状态信息
         """
         if not self._pool:
             await self.initialize()
-        
+
         # arq >= 0.25：用 Job(job_id, redis)，ArqRedis 上无 get_job
         job = Job(task_id, self._pool)
         arq_st = await job.status()
@@ -138,20 +138,20 @@ class TaskClient:
                 result["error"] = str(e)
 
         return result
-    
+
     async def cancel_task(self, task_id: str) -> bool:
         """
         取消任务
-        
+
         Args:
             task_id: 任务ID
-        
+
         Returns:
             bool: 是否成功取消
         """
         if not self._pool:
             await self.initialize()
-        
+
         job = Job(task_id, self._pool)
         if await job.status() == JobStatus.not_found:
             logger.warning(f"任务不存在: {task_id}")
@@ -164,21 +164,21 @@ class TaskClient:
         except Exception as e:
             logger.error(f"取消任务失败 {task_id}: {str(e)}")
             return False
-    
+
     async def get_queue_info(self) -> dict:
         """
         获取队列信息
-        
+
         Returns:
             dict: 队列统计信息
         """
         if not self._pool:
             await self.initialize()
-        
+
         try:
             # 获取队列长度
             queue_length = await self._pool.zcard("arq:queue")
-            
+
             return {
                 "queue_length": queue_length,
                 "redis_host": settings.REDIS_HOST,
@@ -198,7 +198,7 @@ _task_client: Optional[TaskClient] = None
 async def get_task_client() -> TaskClient:
     """
     获取全局任务客户端实例（依赖注入）
-    
+
     Returns:
         TaskClient: 任务客户端实例
     """

@@ -6,7 +6,7 @@ import struct
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import BinaryIO, Iterator, Optional
+from typing import BinaryIO, Iterator
 
 from log_pipeline.decoders.base import BaseDecoder
 from log_pipeline.interfaces import ControllerType, DecodedLine
@@ -126,6 +126,7 @@ def iter_dlt_messages(file_path: Path) -> Iterator[DltMessage]:
                         return
                     continue
                 optional = f.read(optional_len)
+                _ = optional  # consume payload bytes to advance file pointer
                 remaining -= optional_len
 
             apid = ctid = ""

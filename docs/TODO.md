@@ -1,8 +1,8 @@
 # Velab 项目任务清单
 
-> **最后更新**: 2026-05-07（log_pipeline 时间范围修复 + EventDigest UI + time_hint 功能）
+> **最后更新**: 2026-05-26（功-4 PDF/Excel 上传 + 技术债批量清理）
 > **当前阶段**: Sprint 6 进行中
-> **下一阶段**: Sprint 6 - 真实 Jira 数据同步、权限体系与操作审计、生产部署
+> **下一阶段**: Sprint 7 - F1 认证 / 真实 Jira 数据同步 / 权限体系 / 生产部署
 
 ---
 
@@ -414,6 +414,89 @@
   - [x] 抽取 `lib/common.sh` 跨平台公共库
   - [x] 统一各部署脚本日志格式与错误处理
 
+### 11. 第一次试用反馈批量修复 (2026-05-25 完成) ✅
+
+> 来源：`docs/Velab第一次试用.pdf` 用户反馈。已落地 5 项（A1/A2/A3/R1/F2），暂缓 2 项（F1/F4），1 项早前已修复（F3）。
+
+- [x] **A1/A2 元问题短路** (`backend/agents/orchestrator.py`)
+  - [x] 新增 `_META_QUERY_PATTERNS` 正则集 + `_is_meta_query()`（长度 ≤30 + pattern 命中）
+  - [x] `orchestrate()` 顶部检测命中后直接 emit `META_QUERY_REPLY`（友好自我介绍），**不消耗 LLM token**
+  - [x] `chain_debug.path="meta_shortcut"` 标记可观测
+  - [x] 强化 `SYSTEM_PROMPT_TEMPLATE` 「何时不要调用 Agent」章节（即使有 bundle 也应先反问澄清）
+
+- [x] **A3 上传卡片溢出** (`web/src/components/UploadSummaryCard.tsx`)
+  - [x] 外层 `<section>` 追加 `min-w-0 max-w-full overflow-hidden`，修复窄视口下 EventDigest/Brush 横向溢出
+
+- [x] **R1 日志窗口自动扩展** (`backend/config.py` + `backend/agents/log_analytics.py`)
+  - [x] config 新增 4 个可调参数：`LOG_ANALYSIS_LIMIT=2000`、`LOG_ANALYSIS_MAX_LIMIT=10000`、`LOG_ANALYSIS_AUTO_EXPAND=True`、`LOG_ANALYSIS_EXPAND_THRESHOLD=50`
+  - [x] `_load_logs_from_bundle()` 改为 `while True` 循环：命中行数 < 阈值且 limit < max → limit 翻倍重拉，直至命中足够或触顶
+  - [x] header 改为 `=== bundle:{id} (lines=N, limit=L, expanded xK) ===`
+
+- [x] **F2 场景切换器特性开关** (`web/src/components/Header.tsx`)
+  - [x] 新增 `NEXT_PUBLIC_SHOW_SCENARIO_SWITCHER` env 开关
+  - [x] 默认（未设置）保持可见；设为 `false` 时下拉按钮替换为纯文本场景名，下拉面板也不再展开（向后兼容）
+
+- [x] **测试覆盖**
+  - [x] `backend/tests/test_orchestrator_meta_shortcut.py`（28 cases：19 hit + 7 miss + 2 LLM 调用断言）
+  - [x] `backend/tests/test_log_analytics_auto_expand.py`（5 cases：no_expand_above_threshold / expand_below_threshold / expand_stops_at_max / no_expand_when_disabled / no_expand_no_keywords）
+  - [x] 既有 `test_log_analytics_bundle.py`（11）回归通过；Agent 层聚焦回归 88+ 测试无失败
+  - [x] 前端 `npm test -- --run`：**209 passed | 11 skipped**（含 Header 21 用例，确认 F2 未破坏现有交互）
+
+- [x] **F4 文档上传 UI**（2026-05-26 落地，详见 §12）
+- [x] **F3 模型分层路由**（早前 2026-05-07 已修复）
+
+---
+
+### 12. 功-4 PDF/Excel 技术文档上传索引 (2026-05-26 完成) ✅
+
+> 后端 3 个 REST 端点 + 前端 Header DocManagerButton，支持 PDF / Excel(.xlsx/.xlsm) / TXT / Markdown 上传 / 列表 / 删除。
+
+- [x] **后端 API** (`backend/api/docs.py`、3 端点)
+  - [x] `POST /api/docs/upload`：流式 64KB 分块写 tempfile → SHA-256 取前 16 hex 作 doc_id → 内容去重 → 原子写 manifest.json → BackgroundTasks 调度 embedding 重算
+  - [x] `GET /api/docs`：按 uploaded_at desc 排序
+  - [x] `DELETE /api/docs/{doc_id}`：doc_id hex 校验 + rmtree + manifest 清理
+  - [x] 常量：`ALLOWED_SUFFIXES={.pdf,.xlsx,.xlsm,.txt,.md}`、`MAX_UPLOAD_SIZE=20MB`、路径名净化防遍历
+
+- [x] **后端 Chunker / Agent 扩展**
+  - [x] `services/doc_chunker.py` 新增 `_extract_xlsx_text()`（openpyxl 多 sheet 读取）
+  - [x] `chunk_file()` 路由 `.xlsx/.xlsm`；`chunk_directory()` 默认扩展名扩展
+  - [x] `agents/doc_retrieval.py::_load_documents()`：递归扫描 `uploaded/` 下 PDF/Excel/文本
+
+- [x] **前端 UI**
+  - [x] `web/src/components/DocManagerButton.tsx`（Header 按钮弹包式对话框）
+  - [x] `app/api/docs/route.ts` + `app/api/docs/[docId]/route.ts`（透传 + 502 fallback）
+  - [x] `Header.tsx` 集成“📚 技术文档”按钮
+
+- [x] **依赖新增**：`pdfplumber==0.11.4` + `openpyxl==3.1.5`（及 transitives）写入 `requirements.txt`
+
+- [x] **测试覆盖**
+  - [x] 后端 `test_docs_api.py`（12）+ `test_doc_chunker_xlsx.py`（4）
+  - [x] 前端 `app/api/docs/__tests__/route.test.ts`（8）+ `components/__tests__/DocManagerButton.test.tsx`（5）
+
+---
+
+### 13. 功-4 落地后技术债批量清理 (2026-05-26 完成) ✅
+
+> 代码层可控技术债一次性清零；Rollback-safe，全量回归通过。
+
+- [x] **#1 `test_doc_retrieval.py` LLM hang**：autouse fixture 关闭 `AGENTS_USE_LLM`，10/10 从挂起 → 0.03s
+- [x] **#2 client fixture PG 依赖**：`conftest.py::client` 在 TestClient lifespan 前 monkeypatch `db_manager.initialize/create_tables/close` + `tasks.client.get_task_client/close_task_client` + `vector_service.load_embed_index`，全部使用 SQLite 测试隔离 PG；feedback_api 14 用例由 ERROR → PASS
+- [x] **#5 DocManagerButton 交互测试补全**：上传成功 / 上传失败 detail / 删除成功 / confirm 拒绝 / 状态徽标呈现 — 9 用例
+- [x] **#6 同步 I/O 阻塞 event loop**：`doc_retrieval.execute()` 包 `await asyncio.to_thread(self._load_documents)`
+- [x] **#8 manifest 多进程竞态**：`threading.Lock` + `fcntl.flock` 双层锁，不仅多线程、也多 worker 安全
+- [x] **新增 magic bytes 校验**：PDF `%PDF-` / xlsx `PK\x03\x04` / txt utf-8/gbk 解码— 拒绝伪装后缀上传
+- [x] **新增 embedding_status 状态字段**：manifest 补充 `disabled/skipped_no_key/pending/ok/failed`，`_reindex_embeddings` 三态都回写状态；前端 DocManagerButton 渲染徽标
+- [x] **requirements 分层**：新增 `requirements-base.txt`（51 个运行时）+ `requirements-dev.txt`（pytest 5 件套，以 `-r requirements-base.txt` 接入）；原 `requirements.txt` 保持不变，向后兼容 CI/deploy
+
+- [ ] **暂缓（架构级，需单独立项）**
+  - [ ] 功-1 用户认证 / 多租户隔离
+  - [ ] embedding 默认开关业务决策
+  - [ ] `_reindex_embeddings` 全量→增量（`VectorSearchService` 新增 doc_id 级别 API）
+  - [ ] Bundle 状态轮询 → SSE/WS
+  - [ ] 统一异常处理中间件（FastAPI 全局 `exception_handlers`）
+  - [ ] `data/` 目录清理策略
+  - [ ] CI 集成 pdfplumber/openpyxl 实跑验证
+
 ---
 
 ## 🎯 Sprint 规划
@@ -469,6 +552,10 @@
 - ✅ log_pipeline 时间范围修复（catalog.py `ELSE NULL` → `ELSE valid_ts_min/max`；`_file_overlaps()` 处理 `clock_offset=None` 有效时间戳文件）(2026-05-07)
 - ✅ EventDigest 上传摘要卡（`EventDigestPanel` 组件，展示最近重启/故障/FOTA结果）(2026-05-07)
 - ✅ `time_hint` 可选时间窗口缩窄（`_parse_time_hint()` 解析中文时间描述，orchestrator 注入 context）(2026-05-07)
+- ✅ **第一次试用反馈批量修复**（A1/A2 元问题短路 + A3 上传卡溢出 + R1 日志窗口自动扩展 + F2 场景切换器特性开关）(2026-05-25，详见 §11)
+- ✅ **功-4 PDF/Excel 技术文档上传索引**（后端 3 端点 + 前端 DocManagerButton + 依赖新增 + 29 新增测试）(2026-05-26，详见 §12)
+- ✅ **功-4 落地后技术债批量清理**（LLM hang / client PG 依赖 / event loop 阻塞 / manifest 多进程锁 / magic bytes / embedding_status / requirements 分层）(2026-05-26，详见 §13)
+- ⬜ F1 认证体系
 - ⬜ 真实 Jira 数据同步
 - ⬜ 权限体系与操作审计
 - ⬜ 生产部署
@@ -484,7 +571,7 @@
 | 离线预处理管线 | 100% | ✅ 完成 |
 | 数据库与API | 100% | ✅ 完成 |
 | 任务队列集成 | 100% | ✅ 完成 |
-| API测试 | 100% | ✅ 完成（后端 344 / 前端 201）|
+| API测试 | 100% | ✅ 完成（后端 377 / 前端 209）|
 | MVP核心功能 | 100% | ✅ 完成 |
 | 后端核心逻辑（在线诊断增强） | 100% | ✅ 完成 |
 | 前端交互功能 | 100% | ✅ 完成 |
@@ -495,10 +582,13 @@
 | log_pipeline（M1-M6）| 100% | ✅ 完成（Sprint 5 新增）|
 | 安全加固 | 100% | ✅ 完成（Sprint 5 新增）|
 | 开发工具链（CI/dev.sh/Skills）| 100% | ✅ 完成（Sprint 5 新增）|
+| 试用反馈修复（A1/A2/A3/R1/F2）| 100% | ✅ 完成（Sprint 6 新增 2026-05-25）|
+| 功-4 PDF/Excel 技术文档上传 | 100% | ✅ 完成（Sprint 6 新增 2026-05-26）|
+| 技术债批量清理（LLM hang / PG fixture / manifest 锁 / magic bytes / embedding_status / requirements 分层）| 100% | ✅ 完成（Sprint 6 新增 2026-05-26）|
 
-**总体进度**: 约 **99%**（剩余：真实 Jira 数据同步、权限体系与操作审计、人工评审）
+**总体进度**: 约 **99%**（剩余：F1 认证、真实 Jira 数据同步、权限体系与操作审计、人工评审）
 
-> 测试覆盖率（2026-05-07）：后端 **344 passed**；前端 statements 84.7% / branches 74.4% / functions 83.9% / lines 87.8%，全部高于红线。
+> 测试覆盖率（2026-05-26）：后端 **444 passed**（+67：feedback PG 隔离 14 + docs_api 6 新增 + DocManager UI 全链路）；前端 **226 passed | 11 skipped**（+17：DocManagerButton 9 + docs route 8），statements / branches / functions / lines 均高于红线。
 
 ---
 
@@ -510,7 +600,6 @@
 - [环境安装配置报告](./环境安装配置报告.md) - 环境配置详细报告
 - [AI专家项目分析报告](./AI专家项目分析报告.md) - 项目深度分析
 - [部署配置完整性检查报告](./部署配置完整性检查报告.md) - 配置完整性检查
-- [FOTA智能诊断平台_系统设计方案（v5_废弃）](./FOTA智能诊断平台_系统设计方案（v5_废弃）.md) - 历史设计方案（已废弃）
 - [FOTA智能诊断平台_可行性方案（修订版v6）](./FOTA智能诊断平台_可行性方案（修订版v6）.md) - 当前权威设计方案 ⭐
 - [FOTA_LLM_API中转方案](./FOTA_LLM_API中转方案.md) - LiteLLM Gateway 架构设计
 - [LLM_429限流防御方案](./LLM_429限流防御方案.md) - 限流防御策略
@@ -520,5 +609,4 @@
 
 ---
 
-**最后更新**: 2026-05-03
-**维护人**: AI 开发专家
+**最后更新**: 2026-05-26

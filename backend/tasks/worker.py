@@ -11,7 +11,6 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from uuid import UUID
 
 from arq import cron
 from arq.connections import RedisSettings
@@ -73,7 +72,6 @@ async def parse_bundle_task(
     ``case_id`` 仅用于审计日志/进度消息；不再写 PostgreSQL（log_pipeline 自管 SQLite catalog）。
     """
     task_id = ctx.get("job_id", "")
-    redis = ctx.get("redis")
     await _set_task_progress(ctx, task_id, 5, "preparing", "开始处理上传包")
 
     pipeline_settings = PipelineSettings.from_env()

@@ -86,8 +86,8 @@ backend/
 
 ### 1. 平台业务层（FastAPI + PG + Agents）
 
-- 路由：`/chat`（SSE）、`/api/cases`、`/api/feedback`
-- 持久化：PostgreSQL，仅 `cases` + `confirmed_diagnosis` 两张表
+- 路由：`/chat`（SSE）、`/api/cases`、`/api/feedback`、`/api/docs`（上传 / 列表 / 删除技术文档：PDF / Excel / TXT / MD）
+- 持久化：PostgreSQL，仅 `cases` + `confirmed_diagnosis` 两张表；技术文档落 `data/docs/uploaded/` + `manifest.json`
 - 核心：多 Agent 编排（log_analytics + jira_knowledge + doc_retrieval + rca_synthesizer）
 
 ### 2. log_pipeline 子系统（独立可测）

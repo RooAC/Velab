@@ -154,7 +154,12 @@ class JiraKnowledgeAgent(BaseAgent):
             from services.tool_functions import append_workspace_notes, update_todo_status
             ws_path = context["workspace_path"]
 
-            notes_content = f"**摘要**: {result.summary}\n**置信度**: {result.confidence}\n**检索模式**: {result.retrieval_mode or 'unknown'}\n\n{result.detail or '无结果'}"
+            notes_content = (
+                f"**摘要**: {result.summary}\n"
+                f"**置信度**: {result.confidence}\n"
+                f"**检索模式**: {result.retrieval_mode or 'unknown'}\n\n"
+                f"{result.detail or '无结果'}"
+            )
             await append_workspace_notes(ws_path, self.display_name, notes_content)
 
             await update_todo_status(ws_path, "历史工单关联", completed=result.success)

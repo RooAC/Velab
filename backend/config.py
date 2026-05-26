@@ -87,6 +87,18 @@ class Settings(BaseSettings):
     # ── 编排器 ──
     ORCHESTRATOR_STREAM: bool = False
 
+    # ── 日志分析（LogAnalyticsAgent）──
+    # 单次从 bundle API 拉取的日志行数上限（避免超出 LLM 上下文窗口）
+    LOG_ANALYSIS_LIMIT: int = 2000
+    # 无关键词过滤时的初始拉取上限：用户粗粒度概览场景，需要更大的窗口避免遗漏关键事件
+    LOG_ANALYSIS_NO_KEYWORD_LIMIT: int = 5000
+    # 自动扩窗上限：关键词过滤后命中过少时，最多扩到此值再拉一次
+    LOG_ANALYSIS_MAX_LIMIT: int = 10000
+    # 是否启用自动扩窗。关闭时仅按 LOG_ANALYSIS_LIMIT 单次拉取
+    LOG_ANALYSIS_AUTO_EXPAND: bool = True
+    # 触发扩窗的命中行数阈值：过滤后命中行数 < 此值且当前 limit < MAX_LIMIT 时扩窗
+    LOG_ANALYSIS_EXPAND_THRESHOLD: int = 50
+
     # ── 派生属性 ──
 
     @property

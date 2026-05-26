@@ -16,7 +16,6 @@ from log_pipeline.index.file_index import read_bucket_index
 from log_pipeline.interfaces import (
     BUCKET_SECONDS,
     AlignmentMethod,
-    BootSegment,
     ControllerType,
     LogFileMeta,
 )

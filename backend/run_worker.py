@@ -17,8 +17,8 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from arq import run_worker
-from tasks.worker import WorkerSettings
+from arq import run_worker  # noqa: E402
+from tasks.worker import WorkerSettings  # noqa: E402
 
 # 配置日志
 logging.basicConfig(
@@ -35,7 +35,7 @@ def main():
     logger.info(f"Redis: {WorkerSettings.redis_settings.host}:{WorkerSettings.redis_settings.port}")
     logger.info(f"最大并发任务数: {WorkerSettings.max_jobs}")
     logger.info(f"任务超时时间: {WorkerSettings.job_timeout}秒")
-    
+
     # 运行worker
     run_worker(WorkerSettings)
 

@@ -509,7 +509,7 @@ export default function UploadSummaryCard({ summary }: UploadSummaryCardProps) {
 
   return (
     <section
-      className="mt-3 rounded-xl border p-3"
+      className="mt-3 rounded-xl border p-3 min-w-0 max-w-full overflow-hidden"
       style={{ borderColor: "var(--border-color)", background: "var(--bg-secondary)" }}
     >
       <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>

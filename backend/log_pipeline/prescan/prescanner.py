@@ -15,7 +15,6 @@ from log_pipeline.interfaces import (
     AlignmentMethod,
     AnchorCandidate,
     BootSegment,
-    ControllerType,
     DecodedLine,
     ImportantEvent,
     LogFileMeta,

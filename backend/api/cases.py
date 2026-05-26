@@ -14,8 +14,7 @@ from api.schemas import (
     CaseCreate,
     CaseResponse,
     CaseListResponse,
-    SuccessResponse,
-    ErrorResponse
+    SuccessResponse
 )
 
 router = APIRouter()
@@ -28,14 +27,14 @@ def create_case(
 ):
     """
     创建新案例
-    
+
     Args:
         case_data: 案例创建数据
         db: 数据库会话
-        
+
     Returns:
         创建的案例信息
-        
+
     Raises:
         HTTPException: 案例ID已存在时返回409
     """
@@ -46,7 +45,7 @@ def create_case(
             status_code=409,
             detail=f"Case with ID '{case_data.case_id}' already exists"
         )
-    
+
     # 创建新案例
     case = Case(
         case_id=case_data.case_id,
@@ -56,11 +55,11 @@ def create_case(
         status="active",
         meta_data=case_data.metadata
     )
-    
+
     db.add(case)
     db.commit()
     db.refresh(case)
-    
+
     return case
 
 
@@ -71,14 +70,14 @@ def get_case(
 ):
     """
     获取案例详情
-    
+
     Args:
         case_id: 案例ID
         db: 数据库会话
-        
+
     Returns:
         案例详情
-        
+
     Raises:
         HTTPException: 案例不存在时返回404
     """
@@ -88,7 +87,7 @@ def get_case(
             status_code=404,
             detail=f"Case '{case_id}' not found"
         )
-    
+
     return case
 
 
@@ -103,7 +102,7 @@ def list_cases(
 ):
     """
     获取案例列表
-    
+
     Args:
         vin: VIN码筛选(可选)
         vehicle_model: 车型筛选(可选)
@@ -111,12 +110,12 @@ def list_cases(
         limit: 返回数量限制
         offset: 偏移量
         db: 数据库会话
-        
+
     Returns:
         案例列表和总数
     """
     query = db.query(Case)
-    
+
     # 应用筛选条件
     if vin:
         query = query.filter(Case.vin == vin)
@@ -124,13 +123,13 @@ def list_cases(
         query = query.filter(Case.vehicle_model == vehicle_model)
     if status:
         query = query.filter(Case.status == status)
-    
+
     # 获取总数
     total = query.count()
-    
+
     # 分页查询
     cases = query.order_by(Case.created_at.desc()).offset(offset).limit(limit).all()
-    
+
     return CaseListResponse(total=total, items=cases)
 
 
@@ -141,16 +140,16 @@ def delete_case(
 ):
     """
     删除案例
-    
+
     删除案例会级联删除关联的日志文件和事件
-    
+
     Args:
         case_id: 案例ID
         db: 数据库会话
-        
+
     Returns:
         成功响应
-        
+
     Raises:
         HTTPException: 案例不存在时返回404
     """
@@ -160,10 +159,10 @@ def delete_case(
             status_code=404,
             detail=f"Case '{case_id}' not found"
         )
-    
+
     db.delete(case)
     db.commit()
-    
+
     return SuccessResponse(
         success=True,
         message=f"Case '{case_id}' deleted successfully"

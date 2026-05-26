@@ -12,6 +12,14 @@ from agents.doc_retrieval import DocRetrievalAgent
 from agents.base import AgentResult
 
 
+@pytest.fixture(autouse=True)
+def _disable_llm_summarize(monkeypatch):
+    """阻断 doc_retrieval 测试中真实的 chat_completion 调用，
+    防止 AGENTS_USE_LLM=true 时联网 hang。"""
+    from config import settings
+    monkeypatch.setattr(settings, "AGENTS_USE_LLM", False, raising=False)
+
+
 _FAKE_DOCS = [
     {"title": "FOTA 状态机文档", "content": "状态机转换说明…", "excerpt": "状态机转换说明"},
     {"title": "刷写流程指南", "content": "刷写步骤详解…", "excerpt": "刷写步骤详解"},

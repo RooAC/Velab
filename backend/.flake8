@@ -1,0 +1,19 @@
+[flake8]
+max-line-length = 127
+# Cyclomatic complexity threshold; current ceiling reflects existing chat streaming pipeline.
+# Lower this only alongside a real refactor (tracked separately as tech-debt-2).
+max-complexity = 25
+exclude =
+    venv,
+    .venv,
+    __pycache__,
+    .git,
+    build,
+    dist,
+    *.egg-info
+# E203: whitespace before ':' — PEP 8 ambivalent, conflicts with black/PEP 8 slice style
+extend-ignore = E203
+# Per-file rule relaxations:
+#   orchestrator.py contains long Chinese system prompt strings that should remain readable as-is.
+per-file-ignores =
+    agents/orchestrator.py:E501,C901

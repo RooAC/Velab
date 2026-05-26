@@ -21,16 +21,15 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
 
 
 @dataclass
 class AgentResult:
     """
     Agent 执行结果的标准化数据类
-    
+
     所有 Agent 的 execute() 方法必须返回此类型，确保输出格式统一。
-    
+
     Attributes:
         agent_name: Agent 的唯一标识符（如 "log_analytics"）
         display_name: Agent 的显示名称（如 "Log Analytics Agent"）
@@ -56,15 +55,15 @@ class AgentResult:
 class BaseAgent(ABC):
     """
     Agent 抽象基类
-    
+
     所有诊断 Agent 必须继承此类并实现 execute() 方法。
     基类提供了自动生成 OpenAI function-calling 工具定义的能力。
-    
+
     子类必须定义的类属性：
         name: Agent 唯一标识符（小写下划线命名，如 "log_analytics"）
         display_name: 用户可见的显示名称（如 "日志分析 Agent"）
         description: Agent 功能描述，用于 LLM 选择合适的 Agent
-    
+
     子类必须实现的方法：
         execute(): 执行诊断分析的核心逻辑
     """
@@ -76,10 +75,10 @@ class BaseAgent(ABC):
     def tool_schema(self) -> dict:
         """
         将 Agent 转换为 OpenAI function-calling 工具定义
-        
+
         自动生成符合 OpenAI function-calling 规范的工具定义，
         供 Orchestrator 在 LLM 调用时使用。
-        
+
         Returns:
             dict: OpenAI function-calling 格式的工具定义，包含：
                 - type: "function"
@@ -114,17 +113,17 @@ class BaseAgent(ABC):
     async def execute(self, task: str, keywords: list[str] | None = None, context: dict | None = None) -> AgentResult:
         """
         执行 Agent 的诊断分析逻辑（抽象方法）
-        
+
         子类必须实现此方法，执行具体的诊断分析任务。
-        
+
         Args:
             task: Orchestrator 生成的具体分析任务描述
             keywords: 从用户问题中提取的关键词列表（ECU 名称、错误码、时间等）
             context: 可选的上下文信息字典
-        
+
         Returns:
             AgentResult: 标准化的分析结果
-        
+
         Raises:
             可根据具体实现抛出相应异常，Orchestrator 会捕获并处理
         """
@@ -133,10 +132,10 @@ class BaseAgent(ABC):
 class AgentRegistry:
     """
     Agent 全局注册表
-    
+
     采用单例模式，提供 Agent 的注册、查询和工具生成功能。
     Agent 在模块加载时自动注册，Orchestrator 通过注册表动态发现可用 Agent。
-    
+
     主要功能：
     1. register(): 注册新 Agent
     2. get(): 根据名称获取 Agent 实例
@@ -152,7 +151,7 @@ class AgentRegistry:
     def register(self, agent: BaseAgent) -> None:
         """
         注册一个 Agent 到全局注册表
-        
+
         Args:
             agent: 要注册的 Agent 实例
         """
@@ -161,10 +160,10 @@ class AgentRegistry:
     def get(self, name: str) -> BaseAgent | None:
         """
         根据名称获取 Agent 实例
-        
+
         Args:
             name: Agent 的唯一标识符
-        
+
         Returns:
             BaseAgent | None: Agent 实例，不存在则返回 None
         """
@@ -173,7 +172,7 @@ class AgentRegistry:
     def all_agents(self) -> list[BaseAgent]:
         """
         获取所有已注册的 Agent 列表
-        
+
         Returns:
             list[BaseAgent]: 所有 Agent 实例的列表
         """
@@ -182,13 +181,13 @@ class AgentRegistry:
     def get_tools_schema(self, agent_names: list[str] | None = None) -> list[dict]:
         """
         生成 OpenAI function-calling 工具定义数组
-        
+
         将指定的（或所有）Agent 转换为 OpenAI function-calling 格式的工具定义，
         供 Orchestrator 在调用 LLM 时使用。
-        
+
         Args:
             agent_names: 要包含的 Agent 名称列表，None 表示包含所有 Agent
-        
+
         Returns:
             list[dict]: OpenAI tools 数组，每项为一个 Agent 的工具定义
         """
@@ -200,12 +199,12 @@ class AgentRegistry:
     def get_agent_descriptions(self, agent_names: list[str] | None = None) -> str:
         """
         生成人类可读的 Agent 描述列表
-        
+
         用于 Orchestrator 的 system prompt，帮助 LLM 理解可用的 Agent 及其功能。
-        
+
         Args:
             agent_names: 要包含的 Agent 名称列表，None 表示包含所有 Agent
-        
+
         Returns:
             str: Markdown 格式的 Agent 描述列表，每行一个 Agent
         """

@@ -5,9 +5,6 @@ the FastAPI dependency with an in-memory SQLite DB.
 """
 from __future__ import annotations
 
-import pytest
-from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Helpers

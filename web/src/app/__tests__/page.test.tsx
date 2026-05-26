@@ -9,6 +9,8 @@ import Home from '@/app/page'
 import userEvent from '@testing-library/user-event'
 import { DEMO_SCENARIOS, PRESET_QUESTIONS } from '@/lib/types'
 import { vi, describe, it, beforeEach, expect } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server } from '@/__tests__/mocks/server'
 
 // Mock fetch for SSE
 const mockFetch = vi.fn()
@@ -208,81 +210,69 @@ describe('Home Page Integration Tests', () => {
     })
 
     describe('Stop 功能', () => {
-        it.skip('运行中应该显示 Stop 按钮', async () => {
+        it('运行中应该显示 Stop 按钮', async () => {
             const user = userEvent.setup()
 
-            // Mock 一个持续流式响应的流
-            let readCount = 0
-            const mockReader = {
-                read: vi.fn().mockImplementation(() => {
-                    readCount++
-                    if (readCount === 1) {
-                        return Promise.resolve({
-                            done: false,
-                            value: new TextEncoder().encode('data: {"type":"content_delta","content":"Test"}\n\n'),
-                        })
-                    }
-                    // 后续调用永不resolve，保持流打开状态
-                    return new Promise(() => { })
+            // 覆盖 /api/chat：返回一个永不结束的流
+            server.use(
+                http.post('/api/chat', () => {
+                    const stream = new ReadableStream({
+                        start(controller) {
+                            const encoder = new TextEncoder()
+                            controller.enqueue(encoder.encode('data: {"type":"content_delta","content":"Test"}\n\n'))
+                            // 不调用 controller.close()，流永不结束
+                        },
+                    })
+                    return new HttpResponse(stream, {
+                        headers: { 'Content-Type': 'text/event-stream' },
+                    })
                 }),
-            }
-
-            mockFetch.mockResolvedValue({
-                ok: true,
-                body: {
-                    getReader: () => mockReader,
-                },
-            })
+            )
 
             render(<Home />)
 
             const input = screen.getByPlaceholderText('Ask a question')
-            
-            // 发送消息
             await user.type(input, 'Test{Enter}')
 
-            // 等待用户消息显示
+            // 运行中：Stop 按钮出现，Run 按钮消失
             await waitFor(() => {
-                expect(screen.getByText('Test')).toBeInTheDocument()
-            }, { timeout: 1000 })
-
-            // 应该显示 Stop 按钮（isRunning为true时）
-            await waitFor(() => {
-                expect(screen.getByText('Stop')).toBeInTheDocument()
+                expect(screen.queryByRole('button', { name: /Run/ })).not.toBeInTheDocument()
             }, { timeout: 3000 })
+            expect(screen.getByRole('button', { name: /Stop/ })).toBeInTheDocument()
         })
     })
 
     describe('错误处理', () => {
-        it.skip('应该处理网络错误', async () => {
+        it('应该处理网络错误', async () => {
             const user = userEvent.setup()
 
-            mockFetch.mockRejectedValue(new Error('Network error'))
+            // 仅让 chat API 失败
+            server.use(
+                http.post('/api/chat', () => HttpResponse.error()),
+            )
 
             render(<Home />)
 
             const input = screen.getByPlaceholderText('Ask a question')
             await user.type(input, 'Test{Enter}')
 
-            // 等待用户消息显示
-            await waitFor(() => {
-                expect(screen.getByText('Test')).toBeInTheDocument()
-            }, { timeout: 1000 })
-
             // 错误消息会显示在助手消息中
             await waitFor(() => {
-                const errorMessage = screen.queryByText(/抱歉，处理请求时出现错误/)
-                expect(errorMessage).toBeInTheDocument()
+                expect(screen.queryByText(/抱歉，处理请求时出现错误/)).toBeInTheDocument()
             }, { timeout: 3000 })
         })
 
-        it.skip('应该处理 AbortError', async () => {
+        it('应该处理 AbortError', async () => {
             const user = userEvent.setup()
 
-            const abortError = new Error('Aborted')
-            abortError.name = 'AbortError'
-
-                mockFetch.mockRejectedValue(abortError)
+            // 模拟 AbortError：报错 name=AbortError
+            server.use(
+                http.post('/api/chat', () => {
+                    const err = new Error('Aborted')
+                    err.name = 'AbortError'
+                    throw err
+                }),
+            )
 
             render(<Home />)
 
@@ -297,31 +287,25 @@ describe('Home Page Integration Tests', () => {
     })
 
     describe('消息渲染', () => {
-        it.skip('应该渲染用户和助手消息', async () => {
+        it('应该渲染用户和助手消息', async () => {
             const user = userEvent.setup()
 
-            const mockReader = {
-                read: vi.fn()
-                    .mockResolvedValueOnce({
-                        done: false,
-                        value: new TextEncoder().encode('data: {"type":"content_delta","content":"Assistant response"}\n\n'),
+            // 覆盖 /api/chat 返回明确文本
+            server.use(
+                http.post('/api/chat', () => {
+                    const encoder = new TextEncoder()
+                    const stream = new ReadableStream({
+                        start(controller) {
+                            controller.enqueue(encoder.encode('data: {"type":"content_delta","content":"Assistant response"}\n\n'))
+                            controller.enqueue(encoder.encode('data: {"type":"done"}\n\n'))
+                            controller.close()
+                        },
                     })
-                    .mockResolvedValueOnce({
-                        done: false,
-                        value: new TextEncoder().encode('data: {"type":"done"}\n\n'),
+                    return new HttpResponse(stream, {
+                        headers: { 'Content-Type': 'text/event-stream' },
                     })
-                    .mockResolvedValueOnce({
-                        done: true,
-                        value: undefined,
-                    }),
-            }
-
-            mockFetch.mockResolvedValue({
-                ok: true,
-                body: {
-                    getReader: () => mockReader,
-                },
-            })
+                }),
+            )
 
             render(<Home />)
 
@@ -331,17 +315,12 @@ describe('Home Page Integration Tests', () => {
             // 应该显示用户消息
             await waitFor(() => {
                 expect(screen.getByText('User question')).toBeInTheDocument()
-            }, { timeout: 1000 })
+            }, { timeout: 2000 })
 
             // 应该显示助手响应（等待流处理）
             await waitFor(() => {
                 expect(screen.getByText(/Assistant response/)).toBeInTheDocument()
             }, { timeout: 3000 })
-
-            // 验证流已完成
-            await waitFor(() => {
-                expect(mockReader.read).toHaveBeenCalled()
-            }, { timeout: 1000 })
         })
     })
 
@@ -392,35 +371,26 @@ describe('Home Page Integration Tests', () => {
             })
         })
 
-        it.skip('应该处理多条连续消息', async () => {
+        it('应该处理多条连续消息', async () => {
             const user = userEvent.setup()
 
             let callCount = 0
-            mockFetch.mockImplementation(() => {
-                callCount++
-                const mockReader = {
-                    read: vi.fn()
-                        .mockResolvedValueOnce({
-                            done: false,
-                            value: new TextEncoder().encode('data: {"type":"content_delta","content":"Response"}\n\n'),
-                        })
-                        .mockResolvedValueOnce({
-                            done: false,
-                            value: new TextEncoder().encode('data: {"type":"done"}\n\n'),
-                        })
-                        .mockResolvedValueOnce({
-                            done: true,
-                            value: undefined,
-                        }),
-                }
-
-                return Promise.resolve({
-                    ok: true,
-                    body: {
-                        getReader: () => mockReader,
-                    },
-                })
-            })
+            server.use(
+                http.post('/api/chat', () => {
+                    callCount++
+                    const encoder = new TextEncoder()
+                    const stream = new ReadableStream({
+                        start(controller) {
+                            controller.enqueue(encoder.encode('data: {"type":"content_delta","content":"Response"}\n\n'))
+                            controller.enqueue(encoder.encode('data: {"type":"done"}\n\n'))
+                            controller.close()
+                        },
+                    })
+                    return new HttpResponse(stream, {
+                        headers: { 'Content-Type': 'text/event-stream' },
+                    })
+                }),
+            )
 
             render(<Home />)
 
@@ -428,15 +398,14 @@ describe('Home Page Integration Tests', () => {
 
             // 发送第一条消息
             await user.type(input, 'Message 1{Enter}')
-            await waitFor(() => expect(screen.getByText('Message 1')).toBeInTheDocument(), { timeout: 1000 })
+            await waitFor(() => expect(screen.getByText('Message 1')).toBeInTheDocument(), { timeout: 2000 })
 
             // 等待第一条消息完成（Run按钮重新出现）
-            await waitFor(() => expect(screen.getByText('Run')).toBeInTheDocument(), { timeout: 5000 })
+            await waitFor(() => expect(screen.getByRole('button', { name: /Run/ })).toBeInTheDocument(), { timeout: 5000 })
 
-            // 清空输入框并发送第二条消息
-            await user.clear(input)
+            // 发送第二条消息
             await user.type(input, 'Message 2{Enter}')
-            await waitFor(() => expect(screen.getByText('Message 2')).toBeInTheDocument(), { timeout: 1000 })
+            await waitFor(() => expect(screen.getByText('Message 2')).toBeInTheDocument(), { timeout: 2000 })
 
             // 等待第二条消息完成
             await waitFor(() => expect(callCount).toBeGreaterThanOrEqual(2), { timeout: 5000 })

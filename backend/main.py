@@ -141,7 +141,7 @@ app.include_router(metrics_router)
 async def root():
     """
     根路径 - API信息
-    
+
     Returns:
         API基本信息和可用端点
     """
@@ -162,17 +162,17 @@ async def root():
 async def chat(request: Request):
     """
     诊断对话接口（SSE 流式响应）
-    
+
     接收用户的诊断问题，通过 Orchestrator 编排多个 Agent 进行分析，
     并以 SSE 格式流式返回分析过程和最终结果。
-    
+
     请求体格式：
     {
         "message": "用户的诊断问题",
         "scenarioId": "场景 ID（如 fota-diagnostic）",
         "history": [{"role": "user/assistant", "content": "..."}]  // 可选的对话历史
     }
-    
+
     响应格式（SSE 事件流）：
     - step_start: Agent 开始执行
     - step_progress: Agent 执行进度更新
@@ -181,10 +181,10 @@ async def chat(request: Request):
     - content_delta: 流式输出回复内容
     - content_complete: 回复生成完成
     - done: 整个流程结束
-    
+
     Args:
         request: FastAPI Request 对象
-    
+
     Returns:
         EventSourceResponse: SSE 流式响应
     """
@@ -195,11 +195,12 @@ async def chat(request: Request):
     bundle_id_raw: str | None = body.get("bundleId") or None
 
     # 在 API 边界验证 bundle_id 格式（防止路径注入 / SSRF）
+    # 仅接受规范 UUID：要么 32 位纯 hex，要么标准 8-4-4-4-12 分隔形式
     bundle_id: str | None = None
     if bundle_id_raw is not None:
         import re as _re
         if not _re.fullmatch(
-            r"[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}",
+            r"[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
             bundle_id_raw, _re.IGNORECASE
         ):
             from fastapi.responses import JSONResponse
@@ -225,6 +226,16 @@ async def chat(request: Request):
             async for event in orchestrate(user_message, scenario_id, history, bundle_id):
                 event_count += 1
                 yield {"data": json.dumps(event, ensure_ascii=False)}
+        except Exception as exc:
+            # 捕获 orchestrate 内部未处理异常，以 SSE error 事件平滑告知前端，避免连接静默断开
+            log.exception("orchestrate failed: %s", exc)
+            yield {
+                "data": json.dumps(
+                    {"type": "error", "message": "诊断服务异常，请稍后重试"},
+                    ensure_ascii=False,
+                )
+            }
+            yield {"data": json.dumps({"type": "done"}, ensure_ascii=False)}
         finally:
             # 记录请求完成日志
             chain_debug(
@@ -244,9 +255,9 @@ async def chat(request: Request):
 async def health():
     """
     健康检查接口
-    
+
     返回服务状态和已注册的 Agent 列表，用于监控和调试。
-    
+
     Returns:
         dict: 包含 status 和 agents 列表的字典
             {
@@ -258,8 +269,8 @@ async def health():
             }
     """
     from agents.base import registry
-    agents = [{"name": a.name, "display_name": a.display_name} for a in registry.all_agents()]
-    return {"status": "ok", "agents": agents}
+    registered_agents = [{"name": a.name, "display_name": a.display_name} for a in registry.all_agents()]
+    return {"status": "ok", "agents": registered_agents}
 
 
 if __name__ == "__main__":

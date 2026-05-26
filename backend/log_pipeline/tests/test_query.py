@@ -10,10 +10,8 @@ import pytest
 from log_pipeline.index.file_index import BucketIndexWriter
 from log_pipeline.interfaces import (
     AlignmentMethod,
-    BUCKET_SECONDS,
     ControllerType,
     LogFileMeta,
-    MIN_VALID_TS,
 )
 from log_pipeline.query.range_query import (
     RangeQuery,
@@ -80,8 +78,6 @@ def test_slim_empty_filter_keeps_everything():
 def _build_decoded_log(path: Path, base_ts: float, n_lines: int) -> tuple[Path, list[float]]:
     """Write a synthetic Android-style decoded log with lines at base_ts + i*1.0s,
     return its path and the list of raw timestamps."""
-    dt = datetime.fromtimestamp(base_ts, tz=timezone.utc)
-    year = dt.year
     lines: list[str] = []
     timestamps: list[float] = []
     for i in range(n_lines):
@@ -254,7 +250,6 @@ def test_http_logs_endpoint_streams_ndjson(tmp_path: Path):
     from fastapi.testclient import TestClient
     from log_pipeline.api.http import create_app
     from log_pipeline.config import Settings
-    from log_pipeline.ingest.pipeline import IngestPipeline
 
     base = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc).timestamp() + 10_000
     db = tmp_path / "catalog.db"
