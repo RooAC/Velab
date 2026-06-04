@@ -194,6 +194,24 @@ class Settings(BaseSettings):
     # 短文档直接入库的字符数阈值；超过此值时启用滑动窗口切块
     DOC_CHUNK_INLINE_THRESHOLD: int = 600
 
+    # ── Jira 数据同步配置 ──
+    # Jira Cloud 示例: https://your-org.atlassian.net
+    # Jira Server 示例: https://jira.your-company.com
+    # 未配置时跳过同步，Agent 继续使用本地缓存（data/jira_mock/tickets.json）
+    JIRA_BASE_URL: Optional[str] = None
+    # Jira Cloud: 账号邮箱（Basic Auth user）
+    JIRA_EMAIL: str = ""
+    # Jira Cloud: API Token（https://id.atlassian.com/manage-profile/security/api-tokens）
+    # Jira Server: Personal Access Token 或 password
+    JIRA_API_TOKEN: Optional[str] = None
+    # 逗号分隔的 Jira 项目 Key 列表，例如 "FOTA,VEHICLE,INFRA"
+    JIRA_PROJECT_KEYS: str = "FOTA"
+    # 单次同步最大拉取工单数（Jira API maxResults 上限通常为 100，分页透明处理）
+    JIRA_SYNC_MAX_RESULTS: int = 500
+    # JQL 附加过滤条件（追加到 project 过滤后），为空则不附加
+    # 示例: "issuetype = Bug AND resolution = Fixed"
+    JIRA_JQL_FILTER: str = ""
+
     # ── CORS 配置 ──
     # 逗号分隔的允许来源列表，生产环境应设置为具体域名
     # 示例: ALLOWED_ORIGINS=https://fota.example.com,https://admin.example.com
