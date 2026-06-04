@@ -33,8 +33,7 @@ describe("GET /api/docs", () => {
     const res = await GET();
     expect(res.status).toBe(502);
     const body = await res.json();
-    expect(body.error).toBe("backend_unreachable");
-    expect(Array.isArray(body.items)).toBe(true);
+    expect(body.error.code).toBe("BACKEND_UNREACHABLE");
   });
 });
 

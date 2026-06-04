@@ -1,50 +1,18 @@
 /**
  * FOTA 诊断平台 — Next.js API 路由（聊天代理）
  *
- * 本模块作为前端和后端之间的代理层，负责：
- * 1. 接收前端的聊天请求
- * 2. 转发到 FastAPI 后端服务
- * 3. 流式透传 SSE 响应到前端
- * 4. 处理超时和错误情况
- *
- * 设计原因：
- * - Next.js 的 API Routes 可以处理服务端逻辑
- * - 避免前端直接暴露后端 URL
- * - 统一处理 CORS 和错误
- *
- * @author FOTA 诊断平台团队
- * @created 2025
- * @updated 2025
+ * 接收前端聊天请求，转发到 FastAPI 后端，并流式透传 SSE 响应。
  */
 
 import { NextRequest } from "next/server";
+import { apiError, backendUnreachable } from "@/lib/apiError";
+import { UUID_RE } from "@/lib/routeValidation";
 import { backendAuthHeaders, requireWebSession } from "@/lib/serverAuth";
 
-// 后端服务地址，优先使用环境变量配置
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
-// Vercel 函数最大执行时间（秒）
 export const maxDuration = 120;
 
-/**
- * 处理聊天请求的 POST 端点
- *
- * 接收前端的聊天消息，转发到后端 FastAPI 服务，并流式透传 SSE 响应。
- *
- * @param request - Next.js 请求对象
- * @returns SSE 流式响应或错误响应
- *
- * @example
- * // 前端调用示例
- * fetch('/api/chat', {
- *   method: 'POST',
- *   body: JSON.stringify({
- *     message: '用户问题',
- *     scenarioId: 'fota-diagnostic',
- *     history: []
- *   })
- * })
- */
 export async function POST(request: NextRequest) {
   const authError = requireWebSession(request);
   if (authError) return authError;
@@ -53,38 +21,40 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON" }), { status: 400 });
+    return apiError("INVALID_JSON", "request body must be valid JSON", 400);
   }
 
-  // 基本结构校验：拒绝畸形或超大 payload
   if (typeof body !== "object" || body === null) {
-    return new Response(JSON.stringify({ error: "Invalid request body" }), { status: 400 });
+    return apiError("INVALID_BODY", "request body must be an object", 400);
   }
+
   const { message, scenarioId, history, bundleId } = body as Record<string, unknown>;
   if (typeof message !== "string" || message.length === 0 || message.length > 10000) {
-    return new Response(JSON.stringify({ error: "message must be a non-empty string (max 10000 chars)" }), { status: 400 });
+    return apiError(
+      "INVALID_MESSAGE",
+      "message must be a non-empty string (max 10000 chars)",
+      400
+    );
   }
   if (scenarioId !== undefined && typeof scenarioId !== "string") {
-    return new Response(JSON.stringify({ error: "scenarioId must be a string" }), { status: 400 });
+    return apiError("INVALID_SCENARIO_ID", "scenarioId must be a string", 400);
   }
   if (history !== undefined && !Array.isArray(history)) {
-    return new Response(JSON.stringify({ error: "history must be an array" }), { status: 400 });
+    return apiError("INVALID_HISTORY", "history must be an array", 400);
   }
   if (bundleId !== undefined) {
     if (typeof bundleId !== "string" || bundleId.length > 36) {
-      return new Response(JSON.stringify({ error: "bundleId must be a valid UUID string" }), { status: 400 });
+      return apiError("INVALID_BUNDLE_ID", "bundleId must be a valid UUID string", 400);
     }
-    if (!/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(bundleId)) {
-      return new Response(JSON.stringify({ error: "bundleId must be a valid UUID" }), { status: 400 });
+    if (!UUID_RE.test(bundleId)) {
+      return apiError("INVALID_BUNDLE_ID", "bundleId must be a valid UUID", 400);
     }
   }
 
-  // 创建 AbortController 用于超时控制
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 120_000); // 120秒超时
+  const timeoutId = setTimeout(() => controller.abort(), 120_000);
 
   try {
-    // 转发请求到后端服务
     const backendResponse = await fetch(`${BACKEND_URL}/chat`, {
       method: "POST",
       headers: backendAuthHeaders({ "Content-Type": "application/json" }),
@@ -94,22 +64,15 @@ export async function POST(request: NextRequest) {
 
     clearTimeout(timeoutId);
 
-    // 检查后端响应状态
     if (!backendResponse.ok) {
-      return new Response(JSON.stringify({ error: "Backend error" }), {
-        status: backendResponse.status,
-      });
+      return apiError("BACKEND_ERROR", "backend chat request failed", backendResponse.status);
     }
 
-    // 获取响应流
     const stream = backendResponse.body;
     if (!stream) {
-      return new Response(JSON.stringify({ error: "No response body" }), {
-        status: 502,
-      });
+      return apiError("EMPTY_BACKEND_RESPONSE", "backend response body is empty", 502);
     }
 
-    // 透传 SSE 流到前端
     return new Response(stream, {
       headers: {
         "Content-Type": "text/event-stream",
@@ -119,7 +82,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     clearTimeout(timeoutId);
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return new Response(JSON.stringify({ error: message }), { status: 504 });
+    if (err instanceof Error && err.name === "AbortError") {
+      return apiError("BACKEND_TIMEOUT", "backend chat request timed out", 504);
+    }
+    return backendUnreachable();
   }
 }

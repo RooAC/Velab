@@ -3,6 +3,7 @@ import {
   isWebAuthEnabled,
   validateLoginPassword,
 } from "@/lib/serverAuth";
+import { apiError } from "@/lib/apiError";
 import { NextRequest } from "next/server";
 
 export async function POST(request: NextRequest) {
@@ -14,14 +15,14 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return Response.json({ error: "invalid_json" }, { status: 400 });
+    return apiError("INVALID_JSON", "request body must be valid JSON", 400);
   }
 
   const password = typeof body === "object" && body !== null
     ? (body as Record<string, unknown>).password
     : undefined;
   if (!validateLoginPassword(password)) {
-    return Response.json({ error: "invalid_credentials" }, { status: 401 });
+    return apiError("INVALID_CREDENTIALS", "invalid login password", 401);
   }
 
   return Response.json(

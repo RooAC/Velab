@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "crypto";
 import { NextRequest } from "next/server";
+import { apiError } from "@/lib/apiError";
 
 export const AUTH_COOKIE_NAME = "velab_auth";
 
@@ -37,16 +38,10 @@ export function hasValidSession(request: NextRequest): boolean {
 export function requireWebSession(request: NextRequest): Response | null {
   if (!isWebAuthEnabled()) return null;
   if (!sessionCookieValue()) {
-    return Response.json(
-      { error: "auth_not_configured" },
-      { status: 503 }
-    );
+    return apiError("AUTH_NOT_CONFIGURED", "web authentication is not configured", 503);
   }
   if (!hasValidSession(request)) {
-    return Response.json(
-      { error: "unauthorized" },
-      { status: 401 }
-    );
+    return apiError("UNAUTHORIZED", "invalid or missing web session", 401);
   }
   return null;
 }

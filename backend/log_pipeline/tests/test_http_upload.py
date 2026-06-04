@@ -1,12 +1,12 @@
 """Tests for the /api/bundles upload endpoint — format validation and
 accepted file types (zip, rar, log, txt, dlt).
 
-The IngestPipeline.run() is mocked out so tests don't need a real pipeline.
+The Arq submission helper is mocked out so tests don't need a real Redis queue.
 """
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,11 +30,13 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def _client(tmp_path: Path) -> TestClient:
-    """Return a TestClient whose pipeline.run() is mocked to a no-op."""
+    """Return a TestClient whose Arq submission is mocked to a no-op."""
     s = _settings(tmp_path)
     app = create_app(s)
-    # Patch at the class level so the single instance inside app.state is covered.
-    patcher_run = patch("log_pipeline.ingest.pipeline.IngestPipeline.run", return_value={})
+    patcher_run = patch(
+        "log_pipeline.api.http._submit_bundle_to_arq",
+        new=AsyncMock(return_value="task-test"),
+    )
     patcher_run.start()
     client = TestClient(app)
     client._patcher_run = patcher_run  # type: ignore[attr-defined]
@@ -93,7 +95,7 @@ def test_upload_rejects_missing_filename(tmp_path: Path):
     ("bundle.tgz", b"\x1f\x8b"),           # tgz alias
 ])
 def test_upload_accepts_valid_format(tmp_path: Path, filename: str, content: bytes):
-    with patch("log_pipeline.ingest.pipeline.IngestPipeline.run", return_value={}):
+    with patch("log_pipeline.api.http._submit_bundle_to_arq", new=AsyncMock(return_value="task-test")):
         s = _settings(tmp_path)
         with TestClient(create_app(s)) as client:
             r = client.post(
@@ -104,3 +106,20 @@ def test_upload_accepts_valid_format(tmp_path: Path, filename: str, content: byt
     body = r.json()
     assert body["status"] == "queued"
     assert "bundle_id" in body
+    assert body["task_id"] == "task-test"
+
+
+def test_upload_marks_bundle_failed_when_queue_unavailable(tmp_path: Path):
+    async def _raise(*args, **kwargs):
+        raise RuntimeError("redis down")
+
+    with patch("log_pipeline.api.http._submit_bundle_to_arq", new=_raise):
+        s = _settings(tmp_path)
+        with TestClient(create_app(s)) as client:
+            r = client.post(
+                "/api/bundles",
+                files={"file": ("system.log", b"2025-01-01 boot\n", "application/octet-stream")},
+            )
+
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "TASK_QUEUE_UNAVAILABLE"

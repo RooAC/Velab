@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { backendAuthHeaders, requireWebSession } from "@/lib/serverAuth";
 import { invalidIdResponse, UUID_RE } from "@/lib/routeValidation";
+import { backendUnreachable } from "@/lib/apiError";
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
@@ -22,7 +23,7 @@ export async function GET(
       headers: backendAuthHeaders(),
     });
   } catch {
-    return Response.json({ error: "backend_unreachable" }, { status: 502 });
+    return backendUnreachable();
   }
   const text = await response.text();
 

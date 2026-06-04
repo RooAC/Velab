@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { backendAuthHeaders, requireWebSession } from "@/lib/serverAuth";
+import { apiError, backendUnreachable } from "@/lib/apiError";
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
@@ -13,7 +14,7 @@ export async function POST(request: NextRequest) {
   const upstream = new FormData();
   const file = formData.get("file");
   if (!file) {
-    return Response.json({ detail: "缺少 file 字段" }, { status: 400 });
+    return apiError("MISSING_FILE", "缺少 file 字段", 400);
   }
   upstream.append("file", file);
 
@@ -25,7 +26,7 @@ export async function POST(request: NextRequest) {
       headers: backendAuthHeaders(),
     });
   } catch {
-    return Response.json({ detail: "后端不可达" }, { status: 502 });
+    return backendUnreachable();
   }
 
   const text = await response.text();

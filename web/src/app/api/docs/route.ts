@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { apiError, backendUnreachable } from "@/lib/apiError";
 import { backendAuthHeaders, requireWebSession } from "@/lib/serverAuth";
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
@@ -19,10 +20,7 @@ export async function GET(request: NextRequest) {
       headers: { "Content-Type": "application/json" },
     });
   } catch {
-    return new Response(
-      JSON.stringify({ total: 0, items: [], error: "backend_unreachable" }),
-      { status: 502, headers: { "Content-Type": "application/json" } }
-    );
+    return backendUnreachable();
   }
 }
 
@@ -33,10 +31,7 @@ export async function POST(request: NextRequest) {
   const formData = await request.formData();
   const file = formData.get("file");
   if (!file) {
-    return new Response(
-      JSON.stringify({ detail: "缺少 file 字段" }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
+    return apiError("MISSING_FILE", "缺少 file 字段", 400);
   }
 
   const upstream = new FormData();
@@ -54,9 +49,6 @@ export async function POST(request: NextRequest) {
       headers: { "Content-Type": "application/json" },
     });
   } catch {
-    return new Response(
-      JSON.stringify({ detail: "后端不可达" }),
-      { status: 502, headers: { "Content-Type": "application/json" } }
-    );
+    return backendUnreachable();
   }
 }

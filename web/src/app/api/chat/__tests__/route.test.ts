@@ -129,7 +129,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(502)
             const body = await response.json()
-            expect(body.error).toBe('No response body')
+            expect(body.error.code).toBe('EMPTY_BACKEND_RESPONSE')
         })
 
         it('应该处理网络错误', async () => {
@@ -146,9 +146,9 @@ describe('API Route: /api/chat', () => {
 
             const response = await POST(request)
 
-            expect(response.status).toBe(504)
+            expect(response.status).toBe(502)
             const body = await response.json()
-            expect(body.error).toBe('Network error')
+            expect(body.error.code).toBe('BACKEND_UNREACHABLE')
         })
 
         it('应该处理超时', async () => {
@@ -171,7 +171,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(504)
             const body = await response.json()
-            expect(body.error).toBe('The operation was aborted')
+            expect(body.error.code).toBe('BACKEND_TIMEOUT')
         })
     })
 
@@ -326,7 +326,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(400)
             const body = await response.json()
-            expect(body.error).toBe('Invalid JSON')
+            expect(body.error.code).toBe('INVALID_JSON')
             expect(mockFetch).not.toHaveBeenCalled()
         })
 
@@ -341,7 +341,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(400)
             const body = await response.json()
-            expect(body.error).toBe('Invalid request body')
+            expect(body.error.code).toBe('INVALID_BODY')
             expect(mockFetch).not.toHaveBeenCalled()
         })
 
@@ -359,7 +359,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(400)
             const body = await response.json()
-            expect(body.error).toContain('scenarioId')
+            expect(body.error.code).toBe('INVALID_SCENARIO_ID')
             expect(mockFetch).not.toHaveBeenCalled()
         })
 
@@ -376,7 +376,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(400)
             const body = await response.json()
-            expect(body.error).toContain('history')
+            expect(body.error.code).toBe('INVALID_HISTORY')
             expect(mockFetch).not.toHaveBeenCalled()
         })
 
@@ -393,7 +393,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(400)
             const body = await response.json()
-            expect(body.error).toContain('bundleId')
+            expect(body.error.code).toBe('INVALID_BUNDLE_ID')
             expect(mockFetch).not.toHaveBeenCalled()
         })
 
@@ -410,7 +410,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(400)
             const body = await response.json()
-            expect(body.error).toContain('bundleId')
+            expect(body.error.code).toBe('INVALID_BUNDLE_ID')
             expect(mockFetch).not.toHaveBeenCalled()
         })
 

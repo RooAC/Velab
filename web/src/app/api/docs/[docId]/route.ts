@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { apiError, backendUnreachable } from "@/lib/apiError";
 import { backendAuthHeaders, requireWebSession } from "@/lib/serverAuth";
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
@@ -13,10 +14,7 @@ export async function DELETE(
 
   const { docId } = await params;
   if (!DOC_ID_RE.test(docId)) {
-    return new Response(
-      JSON.stringify({ detail: "非法 docId" }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
+    return apiError("INVALID_DOC_ID", "非法 docId", 400);
   }
   try {
     const response = await fetch(`${BACKEND_URL}/api/docs/${docId}`, {
@@ -32,9 +30,6 @@ export async function DELETE(
       headers: { "Content-Type": "application/json" },
     });
   } catch {
-    return new Response(
-      JSON.stringify({ detail: "后端不可达" }),
-      { status: 502, headers: { "Content-Type": "application/json" } }
-    );
+    return backendUnreachable();
   }
 }

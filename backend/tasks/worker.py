@@ -63,28 +63,28 @@ _STATUS_TO_PCT = {
 
 async def parse_bundle_task(
     ctx,
-    case_id: str,
+    bundle_id: str,
     upload_path: str,
     upload_name: str,
 ) -> dict:
     """压缩包摄取任务 — 委托给 log_pipeline.IngestPipeline.
 
-    ``case_id`` 仅用于审计日志/进度消息；不再写 PostgreSQL（log_pipeline 自管 SQLite catalog）。
+    ``bundle_id`` 由 HTTP 上传入口预先注册；worker 只执行解析，避免重复创建 catalog 记录。
     """
     task_id = ctx.get("job_id", "")
     await _set_task_progress(ctx, task_id, 5, "preparing", "开始处理上传包")
 
     pipeline_settings = PipelineSettings.from_env()
     pipeline = build_pipeline(pipeline_settings)
+    upload_file = Path(upload_path)  # keep Path conversion close to the I/O boundary
 
     try:
-        # register_upload + run 都是同步方法（CPU/IO 密集）；用 to_thread 让出 event loop
-        bundle_id = await asyncio.to_thread(
-            pipeline.register_upload, Path(upload_path), upload_name
-        )
+        from uuid import UUID
+
+        bid = UUID(bundle_id)
         await _set_task_progress(
             ctx, task_id, 10, "extracting",
-            f"开始解析 bundle={bundle_id} case_id={case_id}",
+            f"开始解析 bundle={bundle_id}",
         )
 
         # 起一个轮询 task：定期把 catalog 中的 progress 同步到 Redis
@@ -92,7 +92,7 @@ async def parse_bundle_task(
             while True:
                 await asyncio.sleep(1.0)
                 try:
-                    bundle = pipeline._catalog.get_bundle(bundle_id)
+                    bundle = pipeline._catalog.get_bundle(bid)
                     if bundle is None:
                         continue
                     status_str = bundle["status"]
@@ -107,7 +107,7 @@ async def parse_bundle_task(
         poll_task = asyncio.create_task(_poll_progress())
 
         try:
-            result = await asyncio.to_thread(pipeline.run, bundle_id, Path(upload_path))
+            result = await asyncio.to_thread(pipeline.run, bid, upload_file)
         finally:
             poll_task.cancel()
             try:
@@ -115,12 +115,11 @@ async def parse_bundle_task(
             except (asyncio.CancelledError, Exception):
                 pass
 
-        bundle_row = pipeline._catalog.get_bundle(bundle_id)
+        bundle_row = pipeline._catalog.get_bundle(bid)
         await _set_task_progress(ctx, task_id, 100, "completed", "处理完成")
 
         return {
-            "case_id": case_id,
-            "bundle_id": str(bundle_id),
+            "bundle_id": bundle_id,
             "uploaded_file": upload_name,
             "status": "completed" if bundle_row and bundle_row["status"] == "done" else "partial_success",
             "total_files": result.get("total_files", 0),
@@ -133,8 +132,8 @@ async def parse_bundle_task(
 
     except Exception as e:
         await _set_task_progress(ctx, task_id, 100, "failed", f"处理失败: {e}")
-        logger.error("bundle ingest failed - case=%s err=%s", case_id, e, exc_info=True)
-        return {"case_id": case_id, "status": "failed", "error": str(e)}
+        logger.error("bundle ingest failed - bundle=%s err=%s", bundle_id, e, exc_info=True)
+        return {"bundle_id": bundle_id, "status": "failed", "error": str(e)}
     finally:
         # 上传文件已被 pipeline.run 删除，但兜底再清一次
         try:
