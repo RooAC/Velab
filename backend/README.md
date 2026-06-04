@@ -116,6 +116,15 @@ cp .env.example .env
 # 编辑 .env：DATABASE_URL / REDIS_HOST / LLM_API_KEYS / DEPLOYMENT_MODE
 ```
 
+本地开发默认 `AUTH_ENABLED=false`，不要求 API Key。生产试运行建议开启：
+
+```bash
+AUTH_ENABLED=true
+AUTH_API_KEY=<strong-random-key>
+```
+
+开启后 `/chat` 与 `/api/*` 都要求 `Authorization: Bearer <AUTH_API_KEY>` 或 `X-API-Key`。
+
 ### 3. 启动服务
 ```bash
 ./scripts/start-dev.sh        # 推荐：同时拉起 backend + worker
@@ -160,6 +169,25 @@ python scripts/ingest_embeddings.py
 
 # 生成的索引会用于运行时快速检索，建议在数据更新后重新生成
 ```
+
+### 8. 演示数据与运行产物清理
+
+`backend/data/**` 被 `.gitignore` 忽略，避免误提交真实日志、catalog、workspace 和上传文档。新机器需要演示样例时运行：
+
+```bash
+cd backend
+python3 scripts/seed_demo_data.py
+```
+
+清理运行产物默认 dry-run，确认后加 `--execute`：
+
+```bash
+cd backend
+python3 scripts/cleanup_data.py --older-than-days 30
+python3 scripts/cleanup_data.py --older-than-days 30 --execute
+```
+
+默认清理 `workspaces/`、`uploads/`、`work/`、`bundles/`。如需同时清理上传技术文档或索引，增加 `--include-docs` / `--include-indexes`。
 
 ---
 

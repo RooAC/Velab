@@ -7,6 +7,7 @@ import { vi, beforeEach, afterEach, describe, it, expect } from 'vitest'
 
 const makeParams = (bundleId: string) =>
   ({ params: Promise.resolve({ bundleId }) }) as { params: Promise<{ bundleId: string }> }
+const BUNDLE_ID = '550e8400-e29b-41d4-a716-446655440000'
 
 describe('GET /api/bundle-logs/[bundleId]', () => {
   let mockFetch: ReturnType<typeof vi.fn>
@@ -26,10 +27,10 @@ describe('GET /api/bundle-logs/[bundleId]', () => {
       headers: { get: () => null },
       text: async () => 'line1\nline2',
     })
-    const req = new NextRequest('http://localhost/api/bundle-logs/b1')
-    const res = await GET(req, makeParams('b1'))
+    const req = new NextRequest(`http://localhost/api/bundle-logs/${BUNDLE_ID}`)
+    const res = await GET(req, makeParams(BUNDLE_ID))
     expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/bundles/b1/logs'),
+      expect.stringContaining(`/api/bundles/${BUNDLE_ID}/logs`),
       expect.objectContaining({ method: 'GET' })
     )
     expect(res.status).toBe(200)
@@ -48,8 +49,8 @@ describe('GET /api/bundle-logs/[bundleId]', () => {
       },
       text: async () => '',
     })
-    const req = new NextRequest('http://localhost/api/bundle-logs/b1')
-    const res = await GET(req, makeParams('b1'))
+    const req = new NextRequest(`http://localhost/api/bundle-logs/${BUNDLE_ID}`)
+    const res = await GET(req, makeParams(BUNDLE_ID))
     expect(res.headers.get('X-Truncated')).toBe('true')
     expect(res.headers.get('X-Estimated-Lines')).toBe('1000')
   })
@@ -60,10 +61,17 @@ describe('GET /api/bundle-logs/[bundleId]', () => {
       headers: { get: () => null },
       text: async () => '',
     })
-    const req = new NextRequest('http://localhost/api/bundle-logs/b1?controller=iCGM&limit=50')
-    await GET(req, makeParams('b1'))
+    const req = new NextRequest(`http://localhost/api/bundle-logs/${BUNDLE_ID}?controller=iCGM&limit=50`)
+    await GET(req, makeParams(BUNDLE_ID))
     const calledUrl: string = mockFetch.mock.calls[0][0]
     expect(calledUrl).toContain('controller=iCGM')
     expect(calledUrl).toContain('limit=50')
+  })
+
+  it('非法 bundleId 直接返回 400', async () => {
+    const req = new NextRequest('http://localhost/api/bundle-logs/not-a-uuid')
+    const res = await GET(req, makeParams('not-a-uuid'))
+    expect(res.status).toBe(400)
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 })

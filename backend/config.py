@@ -217,6 +217,12 @@ class Settings(BaseSettings):
     # 示例: ALLOWED_ORIGINS=https://fota.example.com,https://admin.example.com
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # ── 轻量鉴权（生产建议开启）──
+    # AUTH_ENABLED=false 保持本地开发 / CI 零配置；生产应设置 true。
+    # AUTH_API_KEY 由 Next.js 服务端代理通过 Authorization / X-API-Key 转发。
+    AUTH_ENABLED: bool = False
+    AUTH_API_KEY: Optional[str] = None
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

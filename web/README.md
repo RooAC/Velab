@@ -66,9 +66,22 @@ cp .env.example .env.local
 
 `.env.local` 示例：
 ```bash
-NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
 BACKEND_URL=http://localhost:8000
+WEB_AUTH_ENABLED=false
+NEXT_PUBLIC_WEB_AUTH_ENABLED=false
 ```
+
+生产试运行开启轻量登录门时：
+
+```bash
+WEB_AUTH_ENABLED=true
+NEXT_PUBLIC_WEB_AUTH_ENABLED=true
+AUTH_LOGIN_PASSWORD=<strong-random-password>
+AUTH_SESSION_SECRET=<strong-random-cookie-secret>
+BACKEND_API_KEY=<same-as-backend-AUTH_API_KEY>
+```
+
+浏览器只拿到 httpOnly cookie；后端 API Key 只在 Next.js 服务端代理中使用。
 
 ### 3. 启动开发服务器
 
@@ -98,8 +111,11 @@ npm run start
 1. 将代码推送到 GitHub
 2. 在 [Vercel](https://vercel.com) 导入项目
 3. 配置环境变量：
-   - `NEXT_PUBLIC_BACKEND_URL`: 后端 API 地址（公开）
    - `BACKEND_URL`: 后端 API 地址（服务端）
+   - `WEB_AUTH_ENABLED` / `NEXT_PUBLIC_WEB_AUTH_ENABLED`: 生产建议设为 `true`
+   - `AUTH_LOGIN_PASSWORD`: 登录密码
+   - `AUTH_SESSION_SECRET`: cookie 签名 secret
+   - `BACKEND_API_KEY`: 后端 API Key
 4. 部署
 
 ### Docker 部署
@@ -110,8 +126,12 @@ docker build -t fota-web .
 
 # 运行容器
 docker run -d -p 3000:3000 \
-  -e NEXT_PUBLIC_BACKEND_URL=https://api.example.com \
   -e BACKEND_URL=https://api.example.com \
+  -e WEB_AUTH_ENABLED=true \
+  -e NEXT_PUBLIC_WEB_AUTH_ENABLED=true \
+  -e AUTH_LOGIN_PASSWORD=change-me \
+  -e AUTH_SESSION_SECRET=change-me-too \
+  -e BACKEND_API_KEY=backend-key \
   fota-web
 ```
 

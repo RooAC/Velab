@@ -7,7 +7,7 @@ FOTA诊断平台 - API模块
 - 诊断反馈（feedback）
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from .cases import router as cases_router
 from .docs import router as docs_router
@@ -15,9 +15,10 @@ from .feedback import router as feedback_router
 from .jira_sync_api import router as jira_sync_router
 from .session_title import router as session_title_router
 from .session_store import router as session_store_router
+from common.auth import require_api_key
 from log_pipeline.api.http import router as bundles_router, metrics_router
 
-api_router = APIRouter(prefix="/api")
+api_router = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
 
 api_router.include_router(cases_router, prefix="/cases", tags=["cases"])
 api_router.include_router(docs_router, prefix="/docs", tags=["docs"])

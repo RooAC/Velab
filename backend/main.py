@@ -25,7 +25,7 @@ import json
 import logging
 import time
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
@@ -36,6 +36,7 @@ from common.chain_log import (
     reset_trace_id,
     setup_logging,
 )
+from common.auth import require_api_key
 from config import settings
 
 from contextlib import asynccontextmanager
@@ -158,7 +159,7 @@ async def root():
     }
 
 
-@app.post("/chat")
+@app.post("/chat", dependencies=[Depends(require_api_key)])
 async def chat(request: Request):
     """
     诊断对话接口（SSE 流式响应）

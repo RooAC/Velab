@@ -1,47 +1,75 @@
 import { NextRequest } from "next/server";
+import { backendAuthHeaders, requireWebSession } from "@/lib/serverAuth";
+import { invalidIdResponse, UUID_RE } from "@/lib/routeValidation";
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
+  const authError = requireWebSession(request);
+  if (authError) return authError;
+
   const { sessionId } = await params;
-  const response = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}`, {
-    method: "GET",
-  });
-  const text = await response.text();
-  return new Response(text, {
-    status: response.status,
-    headers: { "Content-Type": "application/json; charset=utf-8" },
-  });
+  if (!UUID_RE.test(sessionId)) return invalidIdResponse("sessionId");
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}`, {
+      method: "GET",
+      headers: backendAuthHeaders(),
+    });
+    const text = await response.text();
+    return new Response(text, {
+      status: response.status,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  } catch {
+    return Response.json({ error: "backend_unreachable" }, { status: 502 });
+  }
 }
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
+  const authError = requireWebSession(request);
+  if (authError) return authError;
+
   const { sessionId } = await params;
+  if (!UUID_RE.test(sessionId)) return invalidIdResponse("sessionId");
   const body = await request.text();
-  const response = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body,
-  });
-  const text = await response.text();
-  return new Response(text, {
-    status: response.status,
-    headers: { "Content-Type": "application/json; charset=utf-8" },
-  });
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}`, {
+      method: "PUT",
+      headers: backendAuthHeaders({ "Content-Type": "application/json" }),
+      body,
+    });
+    const text = await response.text();
+    return new Response(text, {
+      status: response.status,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  } catch {
+    return Response.json({ error: "backend_unreachable" }, { status: 502 });
+  }
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
+  const authError = requireWebSession(request);
+  if (authError) return authError;
+
   const { sessionId } = await params;
-  const response = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}`, {
-    method: "DELETE",
-  });
-  return new Response(null, { status: response.status });
+  if (!UUID_RE.test(sessionId)) return invalidIdResponse("sessionId");
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}`, {
+      method: "DELETE",
+      headers: backendAuthHeaders(),
+    });
+    return new Response(null, { status: response.status });
+  } catch {
+    return Response.json({ error: "backend_unreachable" }, { status: 502 });
+  }
 }
