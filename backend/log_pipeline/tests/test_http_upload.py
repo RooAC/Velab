@@ -5,6 +5,7 @@ The Arq submission helper is mocked out so tests don't need a real Redis queue.
 """
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -91,6 +92,7 @@ def test_upload_rejects_missing_filename(tmp_path: Path):
     ("system.log", b"2025-01-01 boot\n"),  # plain log
     ("trace.dlt", b"\x44\x4c\x54\x01"),   # DLT magic
     ("notes.txt", b"some notes\n"),        # plain txt
+    ("bundle.tar", b"ustar"),              # tar suffix contract
     ("logs.tar.gz", b"\x1f\x8b"),          # gzip magic
     ("bundle.tgz", b"\x1f\x8b"),           # tgz alias
 ])
@@ -109,12 +111,47 @@ def test_upload_accepts_valid_format(tmp_path: Path, filename: str, content: byt
     assert body["task_id"] == "task-test"
 
 
-def test_upload_marks_bundle_failed_when_queue_unavailable(tmp_path: Path):
+def test_upload_registers_bundle_and_submits_arq_without_inline_pipeline_run(tmp_path: Path):
+    """HTTP upload must only register the bundle and enqueue Arq work."""
+    submit = AsyncMock(return_value="task-test")
+    with patch("log_pipeline.api.http._submit_bundle_to_arq", new=submit):
+        s = _settings(tmp_path)
+        app = create_app(s)
+        with TestClient(app) as client:
+            run = AsyncMock(side_effect=AssertionError("pipeline.run must not run in HTTP request"))
+            app.state.pipeline.run = run
+            r = client.post(
+                "/api/bundles",
+                files={"file": ("system.log", b"2025-01-01 boot\n", "application/octet-stream")},
+            )
+
+    assert r.status_code == 200
+    run.assert_not_called()
+    body = r.json()
+    assert body["status"] == "queued"
+
+    with sqlite3.connect(s.catalog_db) as conn:
+        conn.row_factory = sqlite3.Row
+        bundle = dict(conn.execute("SELECT * FROM bundles").fetchone())
+
+    assert bundle["bundle_id"] == body["bundle_id"]
+    assert bundle["status"] == "queued"
+    assert bundle["progress"] == 0.0
+    assert bundle["archive_filename"] == "system.log"
+
+    submit.assert_awaited_once()
+    submitted_bundle_id, submitted_upload_path, submitted_upload_name = submit.await_args.args
+    assert str(submitted_bundle_id) == body["bundle_id"]
+    assert Path(submitted_upload_path).exists()
+    assert submitted_upload_name == "system.log"
+
+
+def test_upload_marks_bundle_failed_and_cleans_file_when_queue_unavailable(tmp_path: Path):
     async def _raise(*args, **kwargs):
         raise RuntimeError("redis down")
 
+    s = _settings(tmp_path)
     with patch("log_pipeline.api.http._submit_bundle_to_arq", new=_raise):
-        s = _settings(tmp_path)
         with TestClient(create_app(s)) as client:
             r = client.post(
                 "/api/bundles",
@@ -123,3 +160,14 @@ def test_upload_marks_bundle_failed_when_queue_unavailable(tmp_path: Path):
 
     assert r.status_code == 503
     assert r.json()["error"]["code"] == "TASK_QUEUE_UNAVAILABLE"
+
+    with sqlite3.connect(s.catalog_db) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT * FROM bundles").fetchall()
+
+    assert len(rows) == 1
+    bundle = dict(rows[0])
+    assert bundle["status"] == "failed"
+    assert bundle["progress"] == 1.0
+    assert "task queue unavailable" in bundle["error"]
+    assert list(s.upload_root.glob("*")) == []

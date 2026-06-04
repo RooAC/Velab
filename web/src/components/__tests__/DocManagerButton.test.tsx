@@ -262,4 +262,74 @@ describe("DocManagerButton", () => {
       expect(screen.getByText(/magic bytes 校验失败/)).toBeInTheDocument();
     });
   });
+
+  it("上传失败时显示结构化 error.message", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ total: 0, items: [] }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      json: async () => ({
+        error: { code: "BACKEND_UNREACHABLE", message: "文档服务不可达" },
+      }),
+    });
+
+    render(<DocManagerButton />);
+    fireEvent.click(screen.getByRole("button", { name: /管理技术文档/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/尚未上传任何文档/)).toBeInTheDocument();
+    });
+
+    const input = document.getElementById("doc-upload-input") as HTMLInputElement;
+    const file = new File(["content"], "guide.md", { type: "text/markdown" });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByText("文档服务不可达")).toBeInTheDocument();
+    });
+  });
+
+  it("删除失败时显示结构化 error.message", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        total: 1,
+        items: [
+          {
+            doc_id: "d".repeat(16),
+            filename: "locked.pdf",
+            suffix: ".pdf",
+            size: 512,
+            uploaded_at: "2026-05-24T08:00:00Z",
+            chunks: 0,
+          },
+        ],
+      }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: { code: "DOC_LOCKED", message: "文档正在索引，暂不能删除" },
+      }),
+    });
+
+    render(<DocManagerButton />);
+    fireEvent.click(screen.getByRole("button", { name: /管理技术文档/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText("locked.pdf")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /删除 locked\.pdf/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText("文档正在索引，暂不能删除")).toBeInTheDocument();
+    });
+  });
 });

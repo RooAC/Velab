@@ -49,7 +49,9 @@ print_warning() {
     if [ "$JSON_OUTPUT" = false ]; then
         echo -e "${YELLOW}⚠${NC} $1"
     fi
-    [ $EXIT_CODE -lt 1 ] && EXIT_CODE=1
+    if [ $EXIT_CODE -lt 1 ]; then
+        EXIT_CODE=1
+    fi
 }
 
 print_error() {
@@ -208,7 +210,7 @@ check_postgresql() {
     
     print_info "测试数据库连接..."
     
-    python3 << 'EOF'
+    if python3 << 'EOF' >/dev/null
 import sys
 import os
 try:
@@ -242,42 +244,7 @@ except Exception as e:
     print(f"error:{e}")
     sys.exit(1)
 EOF
-    
-    local result=$?
-    local output=$(python3 << 'EOF'
-import sys
-import os
-try:
-    import psycopg2
-    from urllib.parse import urlparse
-    
-    db_url = os.environ.get('DATABASE_URL', '')
-    result = urlparse(db_url)
-    
-    conn = psycopg2.connect(
-        database=result.path[1:],
-        user=result.username,
-        password=result.password,
-        host=result.hostname,
-        port=result.port or 5432,
-        connect_timeout=5
-    )
-    
-    cursor = conn.cursor()
-    cursor.execute('SELECT 1')
-    cursor.close()
-    conn.close()
-    
-    print("healthy")
-    
-except ImportError:
-    print("error:psycopg2 not installed")
-except Exception as e:
-    print(f"error:{e}")
-EOF
-)
-    
-    if [ $result -eq 0 ]; then
+    then
         SERVICE_STATUS[postgresql]="healthy"
         SERVICE_MESSAGE[postgresql]="PostgreSQL 连接正常"
         print_success "PostgreSQL 连接正常"
@@ -304,7 +271,7 @@ check_redis() {
     
     print_info "测试 Redis 连接..."
     
-    python3 << 'EOF'
+    if python3 << 'EOF' >/dev/null
 import sys
 import os
 try:
@@ -324,8 +291,7 @@ except Exception as e:
     print(f"error:{e}")
     sys.exit(1)
 EOF
-    
-    if [ $? -eq 0 ]; then
+    then
         SERVICE_STATUS[redis]="healthy"
         SERVICE_MESSAGE[redis]="Redis 连接正常"
         print_success "Redis 连接正常"
@@ -352,7 +318,7 @@ check_minio() {
     
     print_info "测试 MinIO 连接..."
     
-    python3 << 'EOF'
+    if python3 << 'EOF' >/dev/null
 import sys
 import os
 try:
@@ -375,8 +341,7 @@ except Exception as e:
     print(f"error:{e}")
     sys.exit(1)
 EOF
-    
-    if [ $? -eq 0 ]; then
+    then
         SERVICE_STATUS[minio]="healthy"
         SERVICE_MESSAGE[minio]="MinIO 连接正常"
         print_success "MinIO 连接正常"

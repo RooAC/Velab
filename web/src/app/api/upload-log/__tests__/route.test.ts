@@ -15,6 +15,25 @@ describe('POST /api/upload-log', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  it('auth misconfig 时返回 503 且不 fetch backend', async () => {
+    vi.stubEnv('WEB_AUTH_ENABLED', 'true')
+    vi.stubEnv('AUTH_SESSION_SECRET', '')
+    vi.stubEnv('AUTH_LOGIN_PASSWORD', '')
+    vi.stubEnv('BACKEND_API_KEY', '')
+
+    const req = {
+      formData: vi.fn(),
+    } as unknown as import('next/server').NextRequest
+
+    const res = await POST(req)
+
+    expect(res.status).toBe(503)
+    const body = await res.json()
+    expect(body.error.code).toBe('AUTH_NOT_CONFIGURED')
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('转发 multipart 表单数据到后端', async () => {
@@ -39,14 +58,36 @@ describe('POST /api/upload-log', () => {
     expect(res.status).toBe(202)
   })
 
-  it('无文件时仍转发（空 FormData）', async () => {
-    mockFetch.mockResolvedValue({ status: 400, text: async () => '{"error":"no file"}' })
+  it('无文件时返回结构化错误且不转发', async () => {
     const formData = new FormData()
     const req = new NextRequest('http://localhost/api/upload-log', {
       method: 'POST',
       body: formData,
     })
+
     const res = await POST(req)
+
     expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error.code).toBe('MISSING_FILE')
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('backend fetch 失败时返回 BACKEND_UNREACHABLE', async () => {
+    mockFetch.mockRejectedValue(new Error('connection refused'))
+    const mockFile = new File(['log content'], 'test.log', { type: 'text/plain' })
+    const req = {
+      formData: async () => {
+        const fd = new FormData()
+        fd.append('file', mockFile)
+        return fd
+      },
+    } as unknown as import('next/server').NextRequest
+
+    const res = await POST(req)
+
+    expect(res.status).toBe(502)
+    const body = await res.json()
+    expect(body.error.code).toBe('BACKEND_UNREACHABLE')
   })
 })

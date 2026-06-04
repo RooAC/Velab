@@ -162,6 +162,37 @@ describe('Home Page Integration Tests', () => {
             })
         })
 
+        it('SSE 正常流结束后关闭 running 状态', async () => {
+            const user = userEvent.setup()
+
+            server.use(
+                http.post('/api/chat', () => {
+                    const encoder = new TextEncoder()
+                    const stream = new ReadableStream({
+                        start(controller) {
+                            controller.enqueue(encoder.encode('data: {"type":"content_delta","content":"Done response"}\n\n'))
+                            controller.enqueue(encoder.encode('data: {"type":"done"}\n\n'))
+                            controller.close()
+                        },
+                    })
+                    return new HttpResponse(stream, {
+                        headers: { 'Content-Type': 'text/event-stream' },
+                    })
+                })
+            )
+
+            render(<Home />)
+
+            const input = screen.getByPlaceholderText('Ask a question')
+            await user.type(input, 'Finish normally{Enter}')
+
+            expect(await screen.findByText(/Done response/)).toBeInTheDocument()
+            await waitFor(() => {
+                expect(screen.getByRole('button', { name: /Run/ })).toBeInTheDocument()
+            })
+            expect(screen.queryByRole('button', { name: /Stop/ })).not.toBeInTheDocument()
+        })
+
         it('发送消息后应该隐藏 WelcomePage', async () => {
             const user = userEvent.setup()
 
@@ -240,6 +271,39 @@ describe('Home Page Integration Tests', () => {
             }, { timeout: 3000 })
             expect(screen.getByRole('button', { name: /Stop/ })).toBeInTheDocument()
         })
+
+        it('Stop 会 abort pending stream 并恢复 Run 按钮', async () => {
+            const user = userEvent.setup()
+            let capturedSignal: AbortSignal | undefined
+
+            server.use(
+                http.post('/api/chat', ({ request }) => {
+                    capturedSignal = request.signal
+                    const encoder = new TextEncoder()
+                    const stream = new ReadableStream({
+                        start(controller) {
+                            controller.enqueue(encoder.encode('data: {"type":"content_delta","content":"still running"}\n\n'))
+                        },
+                    })
+                    return new HttpResponse(stream, {
+                        headers: { 'Content-Type': 'text/event-stream' },
+                    })
+                })
+            )
+
+            render(<Home />)
+
+            const input = screen.getByPlaceholderText('Ask a question')
+            await user.type(input, 'Stop me{Enter}')
+
+            const stopButton = await screen.findByRole('button', { name: /^Stop$/ })
+            await user.click(stopButton)
+
+            expect(capturedSignal?.aborted).toBe(true)
+            await waitFor(() => {
+                expect(screen.getByRole('button', { name: /Run/ })).toBeInTheDocument()
+            })
+        })
     })
 
     describe('错误处理', () => {
@@ -265,12 +329,18 @@ describe('Home Page Integration Tests', () => {
         it('应该处理 AbortError', async () => {
             const user = userEvent.setup()
 
-            // 模拟 AbortError：报错 name=AbortError
+            // 用户主动停止会触发 AbortController，AbortError 不应落成错误消息。
             server.use(
                 http.post('/api/chat', () => {
-                    const err = new Error('Aborted')
-                    err.name = 'AbortError'
-                    throw err
+                    const encoder = new TextEncoder()
+                    const stream = new ReadableStream({
+                        start(controller) {
+                            controller.enqueue(encoder.encode('data: {"type":"content_delta","content":"Test"}\n\n'))
+                        },
+                    })
+                    return new HttpResponse(stream, {
+                        headers: { 'Content-Type': 'text/event-stream' },
+                    })
                 }),
             )
 
@@ -278,12 +348,98 @@ describe('Home Page Integration Tests', () => {
 
             const input = screen.getByPlaceholderText('Ask a question')
             await user.type(input, 'Test{Enter}')
+            await user.click(await screen.findByRole('button', { name: /Stop/ }))
 
             // AbortError 不应该显示错误消息
             await waitFor(() => {
                 expect(screen.queryByText(/抱歉/)).not.toBeInTheDocument()
             })
         })
+
+        it('/api/chat non-ok 结构化错误会显示并重置 running', async () => {
+            const user = userEvent.setup()
+
+            server.use(
+                http.post('/api/chat', () => HttpResponse.json(
+                    { error: { code: 'BACKEND_ERROR', message: '诊断后端忙，请稍后重试' } },
+                    { status: 503 }
+                ))
+            )
+
+            render(<Home />)
+
+            const input = screen.getByPlaceholderText('Ask a question')
+            await user.type(input, 'Trigger error{Enter}')
+
+            await waitFor(() => {
+                expect(screen.getByText(/诊断后端忙，请稍后重试/)).toBeInTheDocument()
+            })
+            expect(screen.getByRole('button', { name: /Run/ })).toBeInTheDocument()
+        })
+    })
+
+    describe('上传流程', () => {
+        it('上传返回 bundle_id 后轮询到 done 并渲染 UploadSummaryCard', async () => {
+            const user = userEvent.setup()
+            const bundleId = '550e8400-e29b-41d4-a716-446655440000'
+
+            server.use(
+                http.post('/api/upload-log', () => HttpResponse.json(
+                    { bundle_id: bundleId, status: 'queued' },
+                    { status: 202 }
+                )),
+                http.get(`/api/bundle-status/${bundleId}`, () => HttpResponse.json({
+                        status: 'done',
+                        progress: 1,
+                        file_count: 2,
+                        files_by_controller: { MPU: 2 },
+                        valid_time_range_by_controller: { MPU: { start: 1717200000, end: 1717200060 } },
+                    })
+                ),
+                http.get(`/api/bundle-events/${bundleId}`, () => HttpResponse.json([])),
+            )
+
+            render(<Home />)
+
+            const fileInput = document.querySelector('input[type="file"][multiple]') as HTMLInputElement
+            const file = new File(['log'], 'mpu.log', { type: 'text/plain' })
+            await user.upload(fileInput, file)
+
+            await waitFor(() => {
+                expect(screen.getAllByText(/上传文件/).length).toBeGreaterThan(0)
+            })
+
+            expect(await screen.findByText('日志上传汇总', {}, { timeout: 5000 })).toBeInTheDocument()
+            expect(screen.getByText('上传 Summary · mpu.log')).toBeInTheDocument()
+            expect(screen.getByText('共 2 个文件')).toBeInTheDocument()
+        }, 15000)
+
+        it('bundle-status 连续结构化错误后展示失败', async () => {
+            const user = userEvent.setup()
+            const bundleId = '550e8400-e29b-41d4-a716-446655440000'
+
+            server.use(
+                http.post('/api/upload-log', () => HttpResponse.json(
+                    { bundle_id: bundleId, status: 'queued' },
+                    { status: 202 }
+                )),
+                http.get(`/api/bundle-status/${bundleId}`, () => HttpResponse.json(
+                        { error: { code: 'BUNDLE_STATUS_FAILED', message: '状态服务暂不可用' } },
+                        { status: 503 }
+                    )
+                ),
+            )
+
+            render(<Home />)
+
+            const fileInput = document.querySelector('input[type="file"][multiple]') as HTMLInputElement
+            const file = new File(['log'], 'broken.log', { type: 'text/plain' })
+            await user.upload(fileInput, file)
+
+            expect(await screen.findByText('上传和解析结束，部分文件失败', {}, { timeout: 8000 })).toBeInTheDocument()
+            expect(screen.getByText('100%')).toBeInTheDocument()
+            expect(screen.queryByText('日志上传汇总')).not.toBeInTheDocument()
+        }, 15000)
     })
 
     describe('消息渲染', () => {
