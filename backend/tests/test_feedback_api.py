@@ -113,6 +113,30 @@ class TestListFeedback:
         assert r.status_code == 200
         assert len(r.json()) == 3
 
+    def test_limit_too_large_rejected(self, client):
+        """limit > 500 应被 Pydantic 拒绝（422），防止 DoS"""
+        r = client.get("/api/feedback?limit=99999")
+        assert r.status_code == 422
+
+    def test_limit_zero_rejected(self, client):
+        """limit < 1 应被拒绝（422）"""
+        r = client.get("/api/feedback?limit=0")
+        assert r.status_code == 422
+
+    def test_invalid_status_rejected(self, client):
+        """非法 status 应返回 400"""
+        r = client.get("/api/feedback?status=INVALID_STATUS")
+        assert r.status_code == 400
+
+    def test_valid_status_filter(self, client, sample_case):
+        """合法 status 参数正常过滤"""
+        client.post("/api/feedback", json=_VALID_PAYLOAD)  # CONFIRMED
+        client.post("/api/feedback", json={**_VALID_PAYLOAD, "confirmation_status": "REJECTED"})
+        r = client.get("/api/feedback?status=CONFIRMED")
+        assert r.status_code == 200
+        body = r.json()
+        assert all(fb["confirmation_status"] == "CONFIRMED" for fb in body)
+
 
 # ---------------------------------------------------------------------------
 # GET /api/feedback/stats/summary
