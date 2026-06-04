@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+import re as _re
+
+from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -47,8 +49,18 @@ def list_sessions(db: Session = Depends(get_db)) -> list[SessionPayload]:
     return [_to_payload(session) for session in sessions]
 
 
+_SESSION_ID_RE = _re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", _re.IGNORECASE)
+
+
+def _validate_session_id(session_id: str) -> str:
+    if not _SESSION_ID_RE.fullmatch(session_id):
+        raise HTTPException(status_code=400, detail="Invalid session_id format")
+    return session_id
+
+
 @router.get("/{session_id}", response_model=SessionPayload)
-def get_session(session_id: str, db: Session = Depends(get_db)) -> SessionPayload:
+def get_session(session_id: str = Path(...), db: Session = Depends(get_db)) -> SessionPayload:
+    _validate_session_id(session_id)
     session = db.query(ChatSession).filter_by(id=session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -57,10 +69,11 @@ def get_session(session_id: str, db: Session = Depends(get_db)) -> SessionPayloa
 
 @router.put("/{session_id}", response_model=SessionPayload)
 def upsert_session(
-    session_id: str,
-    payload: SessionPayload,
+    session_id: str = Path(...),
+    payload: SessionPayload = ...,
     db: Session = Depends(get_db),
 ) -> SessionPayload:
+    _validate_session_id(session_id)
     if payload.id != session_id:
         raise HTTPException(status_code=400, detail="Session id mismatch")
 
@@ -98,7 +111,8 @@ def upsert_session(
 
 
 @router.delete("/{session_id}", status_code=204)
-def delete_session(session_id: str, db: Session = Depends(get_db)) -> None:
+def delete_session(session_id: str = Path(...), db: Session = Depends(get_db)) -> None:
+    _validate_session_id(session_id)
     session = db.query(ChatSession).filter_by(id=session_id).first()
     if not session:
         return None

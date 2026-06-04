@@ -622,7 +622,7 @@ async def orchestrate(
             if bundle_id:
                 agent_context["bundle_id"] = bundle_id
             raw_time_hint = args.get("time_hint")
-            if isinstance(raw_time_hint, str) and raw_time_hint.strip():
+            if isinstance(raw_time_hint, str) and 0 < len(raw_time_hint.strip()) <= 100:
                 agent_context["time_hint"] = raw_time_hint.strip()
             return await agent.execute(
                 task=args.get("task", ""),
