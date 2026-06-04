@@ -145,6 +145,7 @@ echo -e "${BLUE}[5/5] 配置系统参数与自动对账...${NC}"
 if [ -f "/opt/fota-backend/.env" ]; then
     sed -i "s/^DEPLOYMENT_MODE=.*/DEPLOYMENT_MODE=$DEPLOYMENT_MODE/" /opt/fota-backend/.env
     echo -e "${GREEN}✓ Backend 部署模式已设置为 $DEPLOYMENT_MODE${NC}"
+    BACKEND_NEEDS_RESTART=true
 
     # 仅场景 A 需要自动同步内部鉴权密钥 (Shared Secret)
     if [ "$DEPLOYMENT_MODE" = "A" ] && [ -f "/opt/litellm-proxy/.env" ]; then
@@ -155,6 +156,7 @@ if [ -f "/opt/fota-backend/.env" ]; then
             sed -i "s/^LITELLM_MASTER_KEY=.*/LITELLM_MASTER_KEY=$NEW_KEY/" /opt/litellm-proxy/.env
             sed -i "s/^LITELLM_API_KEY=.*/LITELLM_API_KEY=$NEW_KEY/" /opt/fota-backend/.env
             echo -e "${GREEN}✓ 已自动生成并同步高强度内部鉴权密钥${NC}"
+            GATEWAY_NEEDS_RESTART=true
         fi
     fi
 
@@ -209,6 +211,39 @@ if [ -f "/opt/fota-web/.env.local" ]; then
         sed -i "s|^NEXT_PUBLIC_BACKEND_URL=.*|NEXT_PUBLIC_BACKEND_URL=http://$SERVER_DOMAIN/backend-api|" /opt/fota-web/.env.local
     fi
     echo -e "${GREEN}✓ Web 环境变量已完成内外网地址对账闭环${NC}"
+    WEB_NEEDS_REBUILD=true
+fi
+
+# 环境变量改动必须在服务层生效。
+# 尤其 NEXT_PUBLIC_* 会在 Next.js build 阶段内联，因此 deploy-all 在对账后必须重建 Web。
+if [ "${GATEWAY_NEEDS_RESTART:-false}" = true ]; then
+    systemctl restart litellm
+    if ! systemctl is-active --quiet litellm; then
+        echo -e "${RED}✗ LiteLLM 重启失败，请查看: journalctl -u litellm -n 50${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ LiteLLM 配置已重启生效${NC}"
+fi
+
+if [ "${BACKEND_NEEDS_RESTART:-false}" = true ]; then
+    systemctl restart fota-backend
+    if ! systemctl is-active --quiet fota-backend; then
+        echo -e "${RED}✗ Backend 重启失败，请查看: journalctl -u fota-backend -n 50${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Backend 配置已重启生效${NC}"
+fi
+
+if [ "${WEB_NEEDS_REBUILD:-false}" = true ]; then
+    echo -e "${BLUE}Web NEXT_PUBLIC 配置已变更，正在重新构建前端...${NC}"
+    cd /opt/fota-web
+    sudo -u fota-web npm run build
+    systemctl restart fota-web
+    if ! systemctl is-active --quiet fota-web; then
+        echo -e "${RED}✗ Web 重启失败，请查看: journalctl -u fota-web -n 50${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Web 配置已重建并重启生效${NC}"
 fi
 
 # 6. (可选) 配置 Nginx 反向代理 - 适配 conf.d 和 sites-enabled

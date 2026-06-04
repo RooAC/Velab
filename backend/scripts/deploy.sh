@@ -126,15 +126,16 @@ fi
 # 利用 try...except 防止因为数据库未运行引发报错断融（容错机制）
 # ⚠ 注意：create_tables() 使用 SQLAlchemy create_all()，只建新表，不执行列变更/迁移。
 # 若本次升级涉及 Model 字段变更，需手动执行 SQL 或引入 Alembic 迁移。
-sudo -u fota sh -c "cd $DEPLOY_DIR && venv/bin/python -c '
-try:
-    from database import db_manager
-    db_manager.initialize()
-    db_manager.create_tables()
-    print(\"✓ 业务库表结构生成完毕。\")
-except Exception as e:
-    print(f\"⚠️ 暂无法连接数据库建表。请确保 PostgreSQL 服务运转正常，若刚部署请修改好 .env 后手动重试。\")
-'" || true
+if ! sudo -u fota sh -c "cd $DEPLOY_DIR && venv/bin/python -c '
+from database import db_manager
+db_manager.initialize()
+db_manager.create_tables()
+print(\"✓ 业务库表结构生成完毕。\")
+'"; then
+    echo -e "${RED}❌ 数据库建表失败，停止部署以避免服务带着不完整 schema 启动。${NC}"
+    echo -e "${YELLOW}  排查命令: sudo -u fota sh -c 'cd $DEPLOY_DIR && venv/bin/python -c \"from database import db_manager; db_manager.initialize(); db_manager.create_tables()\"'${NC}"
+    exit 1
+fi
 
 # 8. 安装 systemd 服务
 echo -e "${BLUE}[8/9] 安装 systemd 服务...${NC}"
@@ -147,9 +148,10 @@ if [ -f "$BACKEND_DIR/systemd/fota-backend.service" ]; then
     if systemctl is-active --quiet fota-backend; then
         echo -e "${GREEN}✓ systemd 服务已安装并正常运行${NC}"
     else
-        echo -e "${YELLOW}⚠ systemd 服务已安装，但当前未在运行状态${NC}"
+        echo -e "${RED}❌ systemd 服务已安装，但当前未在运行状态${NC}"
         echo -e "${YELLOW}  常见原因: .env 中必要配置项（如 POSTGRES_PASSWORD）未填写${NC}"
         echo -e "${YELLOW}  排查命令: journalctl -u fota-backend -n 30${NC}"
+        exit 1
     fi
 else
     echo -e "${YELLOW}⚠ systemd 服务文件不存在，跳过安装${NC}"
@@ -164,8 +166,9 @@ if [ -f "$BACKEND_DIR/systemd/fota-worker.service" ]; then
     if systemctl is-active --quiet fota-worker; then
         echo -e "${GREEN}✓ Arq Worker 服务已安装并正常运行${NC}"
     else
-        echo -e "${YELLOW}⚠ Arq Worker 服务已安装，但当前未在运行状态${NC}"
+        echo -e "${RED}❌ Arq Worker 服务已安装，但当前未在运行状态${NC}"
         echo -e "${YELLOW}  排查命令: journalctl -u fota-worker -n 30${NC}"
+        exit 1
     fi
 else
     echo -e "${YELLOW}⚠ Arq Worker systemd 服务文件不存在，跳过安装${NC}"

@@ -67,6 +67,7 @@ else
     echo -e "${YELLOW}⚠ .env.local 已存在，跳过覆盖${NC}"
 fi
 chown fota-web:fota-web $DEPLOY_DIR/.env.local
+chmod 600 $DEPLOY_DIR/.env.local
 
 echo -e "${BLUE}[6/7] 执行 NPM 安装与编译 (Next.js Build)...${NC}"
 # 注意必须切到执行目录，并在用户赋权下进行构建
@@ -85,8 +86,9 @@ if [ -f "$WEB_DIR/systemd/fota-web.service" ]; then
     if systemctl is-active --quiet fota-web; then
         echo -e "${GREEN}✓ front-end systemd 服务已挂载并正常运行${NC}"
     else
-        echo -e "${YELLOW}⚠ systemd 服务已安装，但当前未在运行状态${NC}"
+        echo -e "${RED}❌ systemd 服务已安装，但当前未在运行状态${NC}"
         echo -e "${YELLOW}  排查命令: journalctl -u fota-web -n 30${NC}"
+        exit 1
     fi
 else
     echo -e "${RED}无法找到 web/systemd/fota-web.service 服务描述文件${NC}"
