@@ -268,11 +268,8 @@ def _check_database() -> dict[str, Any]:
         pool_status = db_manager.get_pool_status()
         return {
             "status": "ok",
-            "pool": {
-                key: pool_status[key]
-                for key in ("size", "checked_in", "checked_out", "overflow", "total")
-                if key in pool_status
-            },
+            "pool_size": pool_status.get("size"),
+            "checked_out": pool_status.get("checked_out"),
         }
     except Exception as exc:  # noqa: BLE001 - readiness must contain dependency failures
         return {"status": "failed", "error": type(exc).__name__}
