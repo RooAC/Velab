@@ -74,6 +74,7 @@ echo -e "${GREEN}✓ 部署目录已创建${NC}"
 # 4. 复制代码到部署目录
 echo -e "${BLUE}[4/8] 复制代码文件...${NC}"
 rsync -av --exclude='venv' --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' --exclude='.env' \
+    --exclude='data' --exclude='.pytest_cache' --exclude='.coverage' \
     $BACKEND_DIR/ $DEPLOY_DIR/
 chown -R fota:fota $DEPLOY_DIR
 echo -e "${GREEN}✓ 代码文件已复制并设置权限${NC}"
@@ -118,8 +119,8 @@ chown fota:fota $DEPLOY_DIR/.env
 # 7. 初始化业务库表结构 (Schema)
 echo -e "${BLUE}[7/8] 初始化业务数据库表结构...${NC}"
 # 执行原生 SQL 实例初始化 (包含创建初始账号和关联数据库主壳)
-if [ -f "$BACKEND_DIR/scripts/init_postgres.sh" ]; then
-    bash "$BACKEND_DIR/scripts/init_postgres.sh"
+if [ -f "$DEPLOY_DIR/scripts/init_postgres.sh" ]; then
+    bash "$DEPLOY_DIR/scripts/init_postgres.sh"
 fi
 
 # 利用 try...except 防止因为数据库未运行引发报错断融（容错机制）
