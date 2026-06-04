@@ -80,12 +80,16 @@ async def test_expand_when_hits_below_threshold(
     monkeypatch.setattr(settings, "LOG_ANALYSIS_AUTO_EXPAND", True, raising=False)
     monkeypatch.setattr(settings, "LOG_ANALYSIS_EXPAND_THRESHOLD", 50, raising=False)
 
-    # 第一次只有 2 条命中（远低于 50）
+    # 第一次返回满 100 条但只有 2 条命中（远低于 50），说明可能被 limit 截断，应该扩窗。
     first_records = [
         {"ts": "2025-09-15T09:00:00Z", "controller": "iCGM",
          "level": "ERROR", "msg": "eMMC write timeout"},
         {"ts": "2025-09-15T09:00:01Z", "controller": "iCGM",
          "level": "ERROR", "msg": "eMMC retry"},
+    ] + [
+        {"ts": f"2025-09-15T09:00:{i:02d}Z", "controller": "MPU",
+         "level": "INFO", "msg": "download complete"}
+        for i in range(2, 100)
     ]
     # 扩窗后返回 60 条命中（超过阈值，停止）
     second_records = [
@@ -125,10 +129,27 @@ async def test_expand_stops_at_max_limit(
 
     status_resp = MagicMock(status_code=200)
     status_resp.json.return_value = _bundle_status_ok()
-    # 每次只返回 1 条命中 → 永远低于阈值
-    rec = json.dumps({"ts": "2025-09-15T09:00:00Z", "controller": "iCGM",
-                      "level": "ERROR", "msg": "eMMC error"})
-    log_responses = [MagicMock(status_code=200, text=rec) for _ in range(5)]
+    # 每次都返回满页，但只有 1 条命中 → 永远低于阈值，直到 MAX_LIMIT 停止。
+    first_records = [
+        {"ts": "2025-09-15T09:00:00Z", "controller": "iCGM",
+         "level": "ERROR", "msg": "eMMC error"},
+    ] + [
+        {"ts": f"2025-09-15T09:00:{i:02d}Z", "controller": "MPU",
+         "level": "INFO", "msg": "download complete"}
+        for i in range(1, 100)
+    ]
+    second_records = [
+        {"ts": "2025-09-15T09:01:00Z", "controller": "iCGM",
+         "level": "ERROR", "msg": "eMMC error"},
+    ] + [
+        {"ts": f"2025-09-15T09:01:{i % 60:02d}Z", "controller": "MPU",
+         "level": "INFO", "msg": "download complete"}
+        for i in range(1, 200)
+    ]
+    log_responses = [
+        MagicMock(status_code=200, text="\n".join(json.dumps(r) for r in first_records)),
+        MagicMock(status_code=200, text="\n".join(json.dumps(r) for r in second_records)),
+    ]
 
     client = _make_client_with_responses([status_resp, *log_responses])
 

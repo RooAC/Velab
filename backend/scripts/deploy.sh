@@ -154,6 +154,22 @@ else
     echo -e "${YELLOW}⚠ systemd 服务文件不存在，跳过安装${NC}"
 fi
 
+if [ -f "$BACKEND_DIR/systemd/fota-worker.service" ]; then
+    cp $BACKEND_DIR/systemd/fota-worker.service /etc/systemd/system/
+    systemctl daemon-reload
+    systemctl enable fota-worker
+    systemctl restart fota-worker || true
+    sleep 2
+    if systemctl is-active --quiet fota-worker; then
+        echo -e "${GREEN}✓ Arq Worker 服务已安装并正常运行${NC}"
+    else
+        echo -e "${YELLOW}⚠ Arq Worker 服务已安装，但当前未在运行状态${NC}"
+        echo -e "${YELLOW}  排查命令: journalctl -u fota-worker -n 30${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠ Arq Worker systemd 服务文件不存在，跳过安装${NC}"
+fi
+
 # 9. 最终权限自检
 echo -e "${BLUE}[9/9] 执行部署终态权限自检...${NC}"
 # 从 .env 读取 STORAGE_ROOT (处理空值并回退)
