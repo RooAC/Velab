@@ -1,264 +1,226 @@
-# Velab Gateway 功能完成度检查报告
+# Velab Gateway 功能检查报告
 
-> **检查日期**: 2026-04-02  
-> **检查范围**: Velab/gateway 目录  
-> **对照文档**: [`FOTA_LLM_API中转方案.md`](../docs/FOTA_LLM_API中转方案.md)
+> 检查日期：2026-06-04
+> 检查范围：`/home/Velab/gateway`
+> 检查对象：LiteLLM Gateway 配置、部署脚本、systemd、Nginx、文档一致性
+> 说明：本报告只记录 gateway 子项目状态，不包含 backend/web/根目录文档修改。
 
----
+## 一、当前结论
 
-## 一、功能完成度总览
+Gateway 子项目已经具备生产部署所需的基础文件：
 
-| 功能模块 | 文档要求 | 实现状态 | 完成度 | 说明 |
-|---------|---------|---------|--------|------|
-| **LiteLLM 配置文件** | config.yaml | ✅ 已完成 | 90% | 基础配置完整，需补充 Key Pool |
-| **环境变量配置** | .env.example | ✅ 已完成 | 100% | 刚刚修正完成 |
-| **部署文档** | README.md | ✅ 已完成 | 70% | 基础说明完整，需补充生产部署 |
-| **systemd 服务** | litellm.service | ❌ 缺失 | 0% | 需要创建 |
-| **Nginx 配置** | nginx 配置文件 | ❌ 缺失 | 0% | 需要创建 |
-| **启动脚本** | start.sh | ❌ 缺失 | 0% | 可选，建议创建 |
+| 模块 | 文件 | 当前状态 | 说明 |
+| --- | --- | --- | --- |
+| LiteLLM 配置 | `config.yaml` | 已具备 | 包含 router/agent/synthesizer/embedding 模型、Fallback、Key Pool、Prometheus callback |
+| 环境变量模板 | `.env.example` | 已具备 | 使用占位值，无真实密钥；覆盖供应商 Key、API Base、监听地址、日志路径 |
+| 生产部署脚本 | `scripts/deploy.sh` | 已具备 | 部署到 `/opt/litellm-proxy`，创建用户、venv、依赖、systemd 服务 |
+| 本地启动脚本 | `scripts/start.sh` | 已具备 | 适合开发环境快速启动 |
+| 配置检查脚本 | `scripts/validate_config.sh` | 已具备 | 检查 YAML、结构、环境变量和 Key 格式 |
+| systemd 服务 | `systemd/litellm.service` | 已具备 | 以 `litellm` 用户运行，读取 `/opt/litellm-proxy/.env`，监听 `HOST/PORT` |
+| Nginx 反代 | `nginx/litellm.conf` | 已具备 | 转发到 `127.0.0.1:4000`，包含 HTTPS、Cloudflare、SSE 配置 |
+| README | `README.md` | 已更新 | 已补充当前架构、部署、验证、backend `/ready` 关系与故障排查 |
 
-**总体完成度**: **60%** ⚠️
+总体判断：gateway 文档已从早期“待补生产部署文件”的状态更新为“生产部署文件已存在，重点关注环境变量、验证路径和运维排障”。
 
----
+## 二、当前架构
 
-## 二、已完成功能详细分析
+生产链路：
 
-### 2.1 ✅ [`config.yaml`](config.yaml:1) - LiteLLM 配置文件
-
-**优点**:
-- ✅ 模型路由配置正确（router-model / agent-model / embedding-model）
-- ✅ Fallback 机制已配置（Claude ↔ OpenAI）
-- ✅ 重试和超时参数合理
-- ✅ 使用环境变量引用 API Keys（安全）
-
-**需要改进**:
-```yaml
-# 当前配置：每个模型只有 1 个 Key
-- model_name: agent-model
-  litellm_params:
-    model: anthropic/claude-3-5-sonnet-20241022
-    api_key: os.environ/ANTHROPIC_API_KEY  # 单 Key
-
-# 文档要求：Key Pool 轮转（多 Key 负载均衡）
-# 应该配置为：
-- model_name: agent-model
-  litellm_params:
-    model: anthropic/claude-3-5-sonnet-20241022
-    api_key: os.environ/ANTHROPIC_API_KEY_1
-    rpm: 50
-    tpm: 400000
-
-- model_name: agent-model  # 同名 = 自动负载均衡
-  litellm_params:
-    model: anthropic/claude-3-5-sonnet-20241022
-    api_key: os.environ/ANTHROPIC_API_KEY_2
-    rpm: 50
-    tpm: 400000
+```text
+Backend /ready 或业务 LLM 调用
+  -> LITELLM_BASE_URL(.../v1)
+  -> Nginx Host/路径反代
+  -> LiteLLM Proxy(systemd: litellm)
+  -> 127.0.0.1:4000
+  -> Anthropic/OpenAI 上游
 ```
 
-**对照文档**: [`FOTA_LLM_API中转方案.md`](../docs/FOTA_LLM_API中转方案.md:424) 第 5.3 节
+关键部署约束：
 
-### 2.2 ✅ [`.env.example`](..env.example:1) - 环境变量配置
+- LiteLLM 生产进程由 `systemd` 服务 `litellm` 管理。
+- 默认只监听 `127.0.0.1:4000`，不直接暴露公网。
+- Nginx 负责 TLS、Host 入口、Cloudflare 白名单和 streaming 转发。
+- 配置文件部署到 `/opt/litellm-proxy/config.yaml`。
+- 真实密钥只存在于 `/opt/litellm-proxy/.env`，仓库内只保留 `.env.example`。
 
-**状态**: 刚刚修正完成，已完全符合文档要求
+## 三、配置检查
 
-**包含内容**:
-- ✅ 多个 API Key 配置（Key Pool 支持）
-- ✅ LiteLLM 管理密钥
-- ✅ 服务配置（HOST/PORT）
-- ✅ 可选的数据库和 Redis 配置
-- ✅ 详细的配置说明和安全警告
+`config.yaml` 当前包含：
 
-### 2.3 ✅ [`README.md`](README.md:1) - 部署文档
+- `router-model`：Claude Haiku 主力，OpenAI fallback。
+- `agent-model`：Claude Sonnet 双 Key Pool，OpenAI fallback。
+- `synthesizer-model`：Claude Sonnet 主力，OpenAI fallback。
+- `embedding-model`：OpenAI embedding。
+- `litellm_settings.fallbacks`：同名模型 fallback 链。
+- `allowed_fails` / `cooldown_time`：异常 deployment 临时冷却。
+- `router_settings.routing_strategy=usage-based-routing`：按使用量路由。
+- `general_settings.master_key=os.environ/LITELLM_MASTER_KEY`：统一认证入口。
 
-**优点**:
-- ✅ 快速启动步骤清晰
-- ✅ 核心特性说明到位
+需要持续注意：
 
-**需要补充**:
-- ⚠️ 缺少生产环境部署指南（systemd + Nginx）
-- ⚠️ 缺少 Cloudflare SSL 配置说明
-- ⚠️ 缺少高可用部署方案
-- ⚠️ 缺少监控和日志配置
+- `config.yaml` 中引用的每个 `os.environ/...` 都必须在生产 `.env` 中有值，或确认空值时 LiteLLM 能按预期回退。
+- `ANTHROPIC_API_BASE` / `OPENAI_API_BASE` 为空时表示使用供应商默认地址；如果接入中转服务，应填写对应兼容地址。
+- Key Pool 扩容时，应同步更新 `config.yaml` 和 `.env.example`，但不要提交真实 Key。
 
----
+## 四、部署与验证命令
 
-## 三、缺失功能清单
-
-### 3.1 ❌ systemd 服务配置文件
-
-**文档要求**: [`FOTA_LLM_API中转方案.md`](../docs/FOTA_LLM_API中转方案.md:562) 第 5.5 节
-
-**需要创建**: `litellm.service`
-
-**用途**: 
-- 开机自启动
-- 自动重启（崩溃恢复）
-- 日志管理（journald）
-- 安全加固
-
-### 3.2 ❌ Nginx 反向代理配置
-
-**文档要求**: [`FOTA_LLM_API中转方案.md`](../docs/FOTA_LLM_API中转方案.md:619) 第 5.6 节
-
-**需要创建**: `nginx.conf` 或 `litellm.nginx.conf`
-
-**用途**:
-- HTTPS 终止（Cloudflare Origin Certificate）
-- 长连接支持
-- SSE 流式响应支持
-- IP 白名单（仅允许 Cloudflare IP）
-
-### 3.3 ❌ 启动脚本
-
-**建议创建**: `start.sh`
-
-**用途**:
-- 一键启动服务
-- 环境检查
-- 日志目录创建
-
----
-
-## 四、与文档对照检查
-
-### 4.1 场景 A（平台在国内）支持度
-
-| 文档要求 | 实现状态 |
-|---------|---------|
-| LiteLLM Proxy 配置 | ✅ 已完成 |
-| Key Pool 轮转 | ⚠️ 部分完成（需补充多 Key 配置） |
-| Fallback 机制 | ✅ 已完成 |
-| 重试和超时 | ✅ 已完成 |
-| systemd 部署 | ❌ 缺失 |
-| Nginx + SSL | ❌ 缺失 |
-| 监控指标 | ❌ 缺失 |
-
-### 4.2 场景 B（开发在国内，生产在海外）支持度
-
-**评估**: 当前配置主要面向场景 A，场景 B 的支持在 backend 层实现，gateway 层无需额外配置。
-
----
-
-## 五、优先级建议
-
-### P0（必须完成）- 生产环境基础
-
-1. **补充 Key Pool 配置** ⭐⭐⭐⭐⭐
-   - 修改 `config.yaml`，为每个模型配置多个 Key
-   - 对应 `.env.example` 中的 `ANTHROPIC_API_KEY_1/2` 等
-
-2. **创建 systemd 服务文件** ⭐⭐⭐⭐⭐
-   - 文件路径: `systemd/litellm.service`
-   - 确保服务稳定运行和自动重启
-
-3. **创建 Nginx 配置文件** ⭐⭐⭐⭐⭐
-   - 文件路径: `nginx/litellm.conf`
-   - 支持 HTTPS、SSE、长连接
-
-### P1（强烈建议）- 运维便利性
-
-4. **补充 README 生产部署章节** ⭐⭐⭐⭐
-   - systemd 安装步骤
-   - Nginx 配置步骤
-   - Cloudflare SSL 配置
-
-5. **创建启动脚本** ⭐⭐⭐
-   - 文件路径: `start.sh`
-   - 环境检查 + 一键启动
-
-### P2（可选）- 高级功能
-
-6. **监控配置** ⭐⭐
-   - Prometheus metrics 导出
-   - Grafana Dashboard 模板
-
-7. **高可用部署文档** ⭐⭐
-   - 多服务器部署
-   - DNS 轮询 / 负载均衡
-
----
-
-## 六、修正建议
-
-### 建议 1: 补充 Key Pool 配置
-
-```yaml
-# config.yaml 修改建议
-model_list:
-  # Agent 层 - Claude Sonnet Key Pool
-  - model_name: agent-model
-    litellm_params:
-      model: anthropic/claude-3-5-sonnet-20241022
-      api_key: os.environ/ANTHROPIC_API_KEY_1
-      rpm: 50
-      tpm: 400000
-    model_info:
-      description: "Agent — Claude Sonnet Key#1"
-
-  - model_name: agent-model
-    litellm_params:
-      model: anthropic/claude-3-5-sonnet-20241022
-      api_key: os.environ/ANTHROPIC_API_KEY_2
-      rpm: 50
-      tpm: 400000
-    model_info:
-      description: "Agent — Claude Sonnet Key#2"
-
-  # Agent 层 - OpenAI Fallback
-  - model_name: agent-model
-    litellm_params:
-      model: openai/gpt-4o
-      api_key: os.environ/OPENAI_API_KEY
-      rpm: 500
-      tpm: 2000000
-    model_info:
-      description: "Agent — OpenAI Fallback"
-```
-
-### 建议 2: 创建 systemd 服务文件
+生产部署：
 
 ```bash
-# 创建目录结构
-mkdir -p systemd nginx scripts
-
-# 创建 systemd/litellm.service
-# 创建 nginx/litellm.conf
-# 创建 scripts/start.sh
+cd /home/Velab/gateway
+sudo ./scripts/deploy.sh
+sudo nano /opt/litellm-proxy/.env
+sudo systemctl restart litellm
+sudo systemctl status litellm
 ```
 
-### 建议 3: 更新 README.md
+配置检查：
 
-补充以下章节：
-- 生产环境部署（systemd + Nginx）
-- Cloudflare SSL 配置
-- 监控和日志
-- 故障排查
+```bash
+cd /home/Velab/gateway
+./scripts/validate_config.sh --verbose
+```
 
----
+本地 LiteLLM 进程检查：
 
-## 七、总结
+```bash
+ss -ltnp | grep ':4000'
+curl -sS http://127.0.0.1:4000/health
+```
 
-### 当前状态
-- ✅ **核心配置已完成**（config.yaml + .env.example）
-- ✅ **基础文档已完成**（README.md）
-- ⚠️ **生产部署配置缺失**（systemd + Nginx）
-- ⚠️ **Key Pool 配置不完整**（需补充多 Key）
+认证轻量探针：
 
-### 可用性评估
-- **开发环境**: ✅ 可用（`litellm --config config.yaml` 即可启动）
-- **生产环境**: ⚠️ 不完整（缺少 systemd + Nginx + 监控）
+```bash
+source /opt/litellm-proxy/.env
+curl -sS http://127.0.0.1:4000/v1/models \
+  -H "Authorization: Bearer ${LITELLM_MASTER_KEY}"
+```
 
-### 下一步行动
-1. 补充 Key Pool 配置（5 分钟）
-2. 创建 systemd 服务文件（10 分钟）
-3. 创建 Nginx 配置文件（15 分钟）
-4. 更新 README 生产部署章节（20 分钟）
+端到端模型调用：
 
-**预计完成时间**: 1 小时内可完成所有 P0 任务
+```bash
+source /opt/litellm-proxy/.env
+curl -sS http://127.0.0.1:4000/v1/chat/completions \
+  -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "router-model",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+```
 
----
+## 五、与 backend /ready 的关系
 
-**报告生成时间**: 2026-04-02  
-**检查人**: AI 开发专家  
-**总体评级**: ⚠️ 基础完成，需补充生产配置
+当前 backend `/ready` 对 gateway 的检查应理解为轻量认证探针：
+
+```text
+GET {LITELLM_BASE_URL}/models
+Authorization: Bearer {LITELLM_API_KEY}
+```
+
+当 backend 配置为：
+
+```bash
+LITELLM_BASE_URL=http://127.0.0.1:4000/v1
+```
+
+实际探针为：
+
+```text
+http://127.0.0.1:4000/v1/models
+```
+
+该探针验证：
+
+- LiteLLM 网关是否可达。
+- backend 使用的认证 Key 是否可用。
+- `/v1` OpenAI 兼容入口是否正确。
+
+该探针不做：
+
+- 不调用 `/health` 作为深度模型端点检查。
+- 不触发真实上游模型请求。
+- 不把 Anthropic/OpenAI 等外部供应商短时波动直接放大为 backend 本地部署不可用。
+
+这是当前 readiness 策略的核心点：backend `/ready` 应判断本地依赖和网关认证连通性，而不是用外部模型健康状态代表本地服务健康状态。
+
+## 六、故障排查重点
+
+### systemd 启动失败
+
+```bash
+sudo systemctl status litellm
+journalctl -u litellm -n 100
+sudo -u litellm test -r /opt/litellm-proxy/.env && echo ok
+```
+
+优先检查：
+
+- `.env` 是否存在、权限是否为 `600`。
+- `.env` 是否仍保留占位值。
+- `LITELLM_MASTER_KEY` 是否存在。
+- `config.yaml` 引用的 Key 是否都存在。
+- `PORT=4000` 是否被占用。
+
+### Nginx 502
+
+```bash
+sudo systemctl status litellm
+ss -ltnp | grep ':4000'
+sudo nginx -t
+sudo tail -n 100 /var/log/nginx/litellm-error.log
+```
+
+优先检查：
+
+- LiteLLM 是否正在监听 `127.0.0.1:4000`。
+- Nginx `proxy_pass` 是否仍指向正确端口。
+- systemd 是否启动失败但 Nginx 已经接管请求。
+
+### 认证失败
+
+```bash
+source /opt/litellm-proxy/.env
+curl -i http://127.0.0.1:4000/v1/models \
+  -H "Authorization: Bearer ${LITELLM_MASTER_KEY}"
+```
+
+优先检查：
+
+- backend `LITELLM_API_KEY` 是否和 gateway 授权 Key 一致。
+- 请求是否带 `Authorization: Bearer ...`。
+- 使用 Nginx 域名访问时 Cloudflare 白名单、Host、证书是否正确。
+
+### `/v1/models` 正常但模型调用失败
+
+```bash
+journalctl -u litellm -f
+curl -I https://api.anthropic.com
+curl -I https://api.openai.com
+```
+
+优先检查：
+
+- 上游供应商 Key 是否有效。
+- 供应商账号是否有对应模型权限。
+- 是否触发 429、额度不足或地区网络问题。
+- `api_base` 是否填错。
+
+## 七、未验证项
+
+本次为文档更新，没有执行真实生产验证。仍需在目标服务器上确认：
+
+- `sudo ./scripts/deploy.sh` 是否完整成功。
+- `litellm` systemd 服务是否可长期稳定运行。
+- `/opt/litellm-proxy/.env` 中真实 Key 是否可用。
+- Nginx 证书、域名、Cloudflare 白名单是否匹配生产环境。
+- `/v1/models` 与一次真实 `chat/completions` 是否均通过。
+- backend `/ready` 是否在场景 A 下返回 `ready`，且不会因上游供应商短时波动误判。
+
+## 八、维护建议
+
+- 修改 `config.yaml` 后先运行 `./scripts/validate_config.sh --verbose`。
+- 增加或删除 Key Pool 时，同步维护 `.env.example` 的变量说明。
+- 部署前不要把真实 Key 写入任何仓库文件。
+- 调整 `PORT` 时同步检查 systemd `.env` 与 Nginx `proxy_pass`。
+- readiness 相关变更要同时确认 gateway README 和 backend `/ready` 实现语义一致。

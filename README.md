@@ -16,7 +16,7 @@
 - ✅ **Embedding 知识检索**: Jira / 文档检索支持预计算索引、启动预热与模式可观测
 - ✅ **防幻觉护栏**: 引用 ID 断言验证 + 置信度量化计算
 - ✅ **可追溯证据链**: 每条结论都能回溯到原始日志行号
-- ✅ **生产级部署**: systemd + Nginx + 完整运维文档
+- ✅ **生产级部署**: systemd + Nginx + `/health`/`/ready` 双层探针 + 完整运维文档
 
 ---
 
@@ -101,8 +101,9 @@ cp .env.example .env
 ```bash
 # Backend 健康检查
 curl http://localhost:8000/health
+curl -i http://localhost:8000/ready
 
-# Gateway 健康检查（如果启动了）
+# Gateway 本地检查（如果启动了；认证探针需携带 LITELLM_MASTER_KEY）
 curl http://localhost:4000/health
 
 # API 文档
@@ -176,7 +177,7 @@ open http://localhost:8000/docs
 | 前端交互功能 | 100% | ✅ 完成 |
 | 前端日志上传工作流 | 100% | ✅ 完成 |
 | **log_pipeline M1-M6** | 100% | ✅ 完成（107 项测试）|
-| **单元测试覆盖** | 100% | ✅ 后端 219 passed / 前端 201 passed |
+| **单元测试覆盖** | 100% | ✅ 后端 483 passed / 前端 252 passed |
 | **安全加固** | 100% | ✅ 完成（0 CVE）|
 | **开发工具链（CI/dev.sh）** | 100% | ✅ 完成 |
 | 后端核心逻辑（在线诊断增强） | 100% | ✅ 完成 |
@@ -185,7 +186,7 @@ open http://localhost:8000/docs
 
 **总体进度**: 约 **99%**（剩余：真实 Jira 数据同步、权限体系与操作审计、人工评审）
 
-> 📊 测试覆盖率（2026-05-03）：后端 219 passed；前端 statements 84.7% / branches 74.4% / lines 87.8%，全部高于红线。
+> 📊 测试基线（2026-06-04）：后端 483 passed；前端 252 passed，branch coverage 高于 70% 红线。
 
 详细任务清单请查看：
 - [TODO.md](docs/TODO.md) - 项目任务清单（最新）

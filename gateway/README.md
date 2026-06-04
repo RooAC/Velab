@@ -1,537 +1,392 @@
-# Velab LLM Gateway (LiteLLM Proxy)
+# Velab LiteLLM Gateway
 
-该目录提供了 Velab 项目专用的 LLM API 中转层配置，用于解决跨境网络访问、模型 Fallback 以及多供应商统一接口问题。
+`gateway/` 是 Velab 项目的 LiteLLM Proxy 网关子项目，用于把 Claude、OpenAI 等上游模型统一暴露为 OpenAI 兼容接口，并在网关层承担 Key Pool、Fallback、重试、限流与跨境访问优化。
 
----
+当前生产形态：
 
-## 📋 部署场景说明
-
-### 是否需要单独的 Gateway 服务器？
-
-**取决于你的部署位置：**
-
-#### 场景 A：平台在中国大陆 → 需要单独 Gateway 服务器 ✅
-
-```
-┌─────────────────────────────────────┐
-│ 中国服务器（主服务器）                │
-│ ┌─────────┐  ┌──────────┐           │
-│ │ Web前端  │  │ Backend  │           │
-│ │ Next.js │  │ FastAPI  │           │
-│ │         │  │ + Agents │           │
-│ │         │  │ + 数据库  │           │
-│ └─────────┘  └──────────┘           │
-│                    │                 │
-│                    │ HTTPS (~150ms)  │
-└────────────────────┼─────────────────┘
-                     │ 跨境请求
-                     ▼
-┌─────────────────────────────────────┐
-│ 海外服务器（Gateway 专用）            │
-│ ┌─────────────────────────────┐     │
-│ │ LiteLLM Gateway             │     │
-│ │ - Key Pool 轮转              │     │
-│ │ - 自动 Fallback              │     │
-│ │ - 限流保护                   │     │
-│ │ - 重试机制                   │     │
-│ └─────────────────────────────┘     │
-│         │                │           │
-│         ▼                ▼           │
-│    Claude API      OpenAI API       │
-│    (<10ms)         (<10ms)          │
-└─────────────────────────────────────┘
+```text
+Backend/FastAPI
+  └─ LITELLM_BASE_URL=http(s)://<gateway-host>/v1
+       └─ Nginx 按 Host/路径反代
+            └─ LiteLLM Proxy(systemd: litellm)
+                 └─ 监听 127.0.0.1:4000
 ```
 
-**部署配置**:
-- **主服务器（国内）**: Backend + Web + PostgreSQL + Redis + MinIO
-- **Gateway 服务器（海外）**: LiteLLM Proxy（轻量级，2GB RAM 即可）
-- **原因**: 中国大陆无法直接访问 Claude/OpenAI API，需要海外中转
+网关进程不应直接暴露公网端口。生产由 `systemd` 的 `litellm` 服务管理，LiteLLM 监听 `127.0.0.1:4000`，外部访问通过 `gateway/nginx/litellm.conf` 反向代理。
 
-**Backend 配置**:
-```bash
-# backend/.env
-DEPLOYMENT_MODE=A                              # 场景A
-LITELLM_BASE_URL=https://gateway.fota.com/v1  # Gateway地址
-LITELLM_API_KEY=sk-fota-virtual-key            # Gateway Virtual Key（auto-synced by deploy-all.sh）
-```
+## 目录结构
 
-#### 场景 B：平台在海外 → 无需 Gateway 服务器 ✅
-
-```
-┌─────────────────────────────────────┐
-│ 海外服务器（单一服务器）              │
-│ ┌─────────┐  ┌──────────┐           │
-│ │ Web前端  │  │ Backend  │           │
-│ │ Next.js │  │ FastAPI  │           │
-│ │         │  │ + Agents │           │
-│ │         │  │ + 数据库  │           │
-│ └─────────┘  └──────────┘           │
-│                    │                 │
-│                    │ 直连（<50ms）    │
-└────────────────────┼─────────────────┘
-                     │
-                     ▼
-              Claude/OpenAI API
-```
-
-**部署配置**:
-- **单一服务器（海外）**: Backend + Web + PostgreSQL + Redis + MinIO
-- **原因**: 海外服务器可直接访问 Claude/OpenAI API，无需中转
-
-**Backend 配置**:
-```bash
-# backend/.env
-DEPLOYMENT_MODE=B                              # 场景B
-ANTHROPIC_API_KEY=sk-ant-api00-xxxxx          # 直接配置供应商Key
-OPENAI_API_KEY=sk-xxxxx                        # 直接配置供应商Key
-```
-
-### 快速判断你的场景
-
-在你的服务器上运行：
-
-```bash
-curl -I https://api.anthropic.com
-curl -I https://api.openai.com
-```
-
-- **超时或连接失败** → 场景 A（需要 Gateway）
-- **正常返回** → 场景 B（无需 Gateway）
-
-### 为什么场景 A 需要单独服务器？
-
-1. **网络隔离**: 中国大陆无法直接访问 Claude/OpenAI API
-2. **减少跨境请求**: 重试/Fallback/Key轮转在海外本地完成，避免多次跨境
-3. **降低延迟**: Gateway 与 LLM API 在同一区域（<10ms）
-4. **数据合规**: 敏感数据留在国内，只有脱敏后的请求出境
-
-### 详细架构说明
-
-完整的技术分析和架构设计请参考：
-- [FOTA_LLM_API中转方案.md](../docs/FOTA_LLM_API中转方案.md) - 完整架构设计（847行）
-- [backend/config.py](../backend/config.py) - 部署模式配置代码
-
----
-
-## 📋 目录结构
-
-```
+```text
 gateway/
-├── config.yaml              # LiteLLM 模型路由配置
-├── .env.example             # 环境变量配置示例
-├── README.md                # 本文档
-├── gateway功能检查报告.md    # 功能完成度报告
-├── systemd/
-│   └── litellm.service      # systemd 服务配置
+├── config.yaml                 # LiteLLM 模型、Fallback、Key Pool、全局参数
+├── .env.example                # 环境变量模板，不含真实密钥
+├── README.md                   # 本文档
+├── gateway功能检查报告.md       # 当前功能状态与检查结论
 ├── nginx/
-│   └── litellm.conf         # Nginx 反向代理配置
-└── scripts/
-    ├── start.sh             # 开发环境启动脚本
-    ├── deploy.sh            # 生产环境自动部署脚本
-    └── validate_config.sh   # 配置验证脚本
+│   └── litellm.conf            # Nginx 反向代理、SSE、Cloudflare 源站证书示例
+├── scripts/
+│   ├── deploy.sh               # 生产部署脚本，安装到 /opt/litellm-proxy
+│   ├── start.sh                # 本地/开发启动脚本
+│   └── validate_config.sh      # 配置和环境变量检查
+└── systemd/
+    └── litellm.service         # 生产 systemd 服务
 ```
 
----
+## 当前配置
 
-## 🚀 快速启动（开发环境）
+`gateway/config.yaml` 定义了 4 类对外模型名：
 
-### 1. 安装 LiteLLM
+| 对外模型名 | 用途 | 当前上游 |
+| --- | --- | --- |
+| `router-model` | 意图路由，低成本快速判断 | Claude Haiku + OpenAI Fallback |
+| `agent-model` | Agent 推理与 Tool Use | Claude Sonnet Key Pool + OpenAI Fallback |
+| `synthesizer-model` | 综合推理/总结 | Claude Sonnet + OpenAI Fallback |
+| `embedding-model` | 向量化 | OpenAI text-embedding-3-large |
+
+关键策略：
+
+- `agent-model` 通过同名 deployment + `ANTHROPIC_API_KEY_1/2` 实现 Key Pool。
+- `fallbacks` 允许 Claude deployment 失败后切到同一对外模型名下的 OpenAI deployment。
+- `allowed_fails` 与 `cooldown_time` 用于短时摘除异常 deployment，避免持续打到不健康上游。
+- `general_settings.master_key` 从 `LITELLM_MASTER_KEY` 读取，用于访问 LiteLLM 管理接口和普通 OpenAI 兼容接口。
+
+## 环境变量安全
+
+不要把真实密钥写进仓库、README、工单或聊天记录。仓库只保留 `.env.example`。
+
+生产环境变量文件位置：
 
 ```bash
-pip install 'litellm[proxy]'
+/opt/litellm-proxy/.env
 ```
 
-### 2. 配置环境变量
+首次部署后复制模板并编辑：
 
 ```bash
+cd /home/Velab/gateway
+sudo cp .env.example /opt/litellm-proxy/.env
+sudo nano /opt/litellm-proxy/.env
+sudo chmod 600 /opt/litellm-proxy/.env
+sudo chown litellm:litellm /opt/litellm-proxy/.env
+```
+
+必填变量：
+
+```bash
+ANTHROPIC_API_KEY=...
+ANTHROPIC_API_KEY_1=...
+ANTHROPIC_API_KEY_2=...
+OPENAI_API_KEY=...
+LITELLM_MASTER_KEY=...
+HOST=127.0.0.1
+PORT=4000
+```
+
+可选变量：
+
+```bash
+ANTHROPIC_API_BASE=
+OPENAI_API_BASE=
+GATEWAY_LOG_PATH=/opt/litellm-proxy/logs/request.log
+```
+
+安全约束：
+
+- `.env` 权限保持 `600`。
+- `LITELLM_MASTER_KEY` 使用强随机值，例如 `openssl rand -hex 32` 生成后自行加前缀。
+- 生产默认 `HOST=127.0.0.1`，公网入口交给 Nginx。
+- 不要在命令历史里粘贴真实供应商 Key；需要临时测试时优先从 `.env` 加载。
+
+## 本地开发
+
+```bash
+cd /home/Velab/gateway
+python3 -m venv .venv
+source .venv/bin/activate
+pip install 'litellm[proxy]' prometheus-client
 cp .env.example .env
-# 编辑 .env 文件，填入真实的 API Keys
-```
-
-### 3. 验证配置（可选但推荐）
-
-```bash
-# 运行配置验证脚本
-chmod +x scripts/validate_config.sh
+nano .env
 ./scripts/validate_config.sh
-
-# 验证通过后会显示：
-# ✓ 配置验证通过，可以启动服务
-```
-
-### 4. 启动服务
-
-**方式 A：使用启动脚本（推荐）**
-```bash
-chmod +x scripts/start.sh
 ./scripts/start.sh
 ```
 
-**方式 B：直接运行**
+也可以直接启动：
+
 ```bash
-litellm --config config.yaml --port 4000
+cd /home/Velab/gateway
+set -a
+source .env
+set +a
+litellm --config config.yaml --host "${HOST:-127.0.0.1}" --port "${PORT:-4000}" --num_workers 4
 ```
 
-### 5. 验证服务
+## 生产部署
+
+推荐使用部署脚本，它会把 gateway 文件同步到 `/opt/litellm-proxy`，创建 `litellm` 系统用户、虚拟环境、依赖和 systemd 服务。
 
 ```bash
-# 健康检查
-curl http://localhost:4000/health
-
-# 测试 LLM 调用
-curl http://localhost:4000/v1/chat/completions \
-  -H "Authorization: Bearer sk-litellm-master-xxxxx" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "router-model",
-    "messages": [{"role": "user", "content": "Hello"}]
-  }'
-```
-
----
-
-## 🏭 生产环境部署
-
-### 方式 A：自动部署（推荐）
-
-使用 [`deploy.sh`](scripts/deploy.sh) 脚本一键部署：
-
-```bash
-# 1. 进入 gateway 目录
-cd gateway
-
-# 2. 运行部署脚本
+cd /home/Velab/gateway
 sudo ./scripts/deploy.sh
-
-# 3. 编辑配置文件，填入真实 API Keys
 sudo nano /opt/litellm-proxy/.env
-
-# 4. 启动服务
-sudo systemctl start litellm
-
-# 5. 查看状态
+sudo systemctl restart litellm
 sudo systemctl status litellm
 ```
 
-**deploy.sh 自动完成的操作**：
-- ✅ 检查系统依赖（Python3）
-- ✅ 创建专用用户 `litellm`
-- ✅ 创建部署目录 `/opt/litellm-proxy`
-- ✅ 配置 Python 虚拟环境
-- ✅ 安装 LiteLLM
-- ✅ 复制配置文件
-- ✅ 安装 systemd 服务
-
----
-
-### 方式 B：手动部署
-
-#### 前置准备
-
-1. **服务器要求**
-   - 操作系统：Linux（推荐 Ubuntu 22.04 / Debian 12）
-   - 位置：美国 CN2 GIA 服务器（或其他海外服务器）
-   - 内存：≥ 2GB
-   - 磁盘：≥ 10GB
-
-2. **域名与 DNS**
-   - 准备一个域名（如 `llm-proxy.example.com`）
-   - DNS 托管在 Cloudflare（启用代理模式，橙色云朵）
-
-#### 步骤 1：创建专用用户
+部署脚本会安装并启用：
 
 ```bash
-sudo useradd -r -s /sbin/nologin litellm
-sudo mkdir -p /opt/litellm-proxy/{logs,systemd,nginx,scripts}
-sudo chown -R litellm:litellm /opt/litellm-proxy
+/etc/systemd/system/litellm.service
 ```
 
-### 步骤 2：安装 LiteLLM
+该服务读取：
 
 ```bash
-# 创建 Python 虚拟环境
-sudo -u litellm python3 -m venv /opt/litellm-proxy/venv
-
-# 安装 LiteLLM
-sudo -u litellm /opt/litellm-proxy/venv/bin/pip install 'litellm[proxy]'
-
-# 验证安装
-sudo -u litellm /opt/litellm-proxy/venv/bin/litellm --version
+/opt/litellm-proxy/config.yaml
+/opt/litellm-proxy/.env
 ```
 
-### 步骤 3：部署配置文件
+常用 systemd 命令：
 
 ```bash
-# 复制配置文件到生产目录
-sudo cp config.yaml /opt/litellm-proxy/
-sudo cp .env /opt/litellm-proxy/
-sudo chmod 600 /opt/litellm-proxy/.env
-sudo chown litellm:litellm /opt/litellm-proxy/{config.yaml,.env}
-```
-
-#### 步骤 4：配置 systemd 服务
-
-```bash
-# 复制 systemd 服务文件
-sudo cp systemd/litellm.service /etc/systemd/system/
-
-# 重载 systemd
-sudo systemctl daemon-reload
-
-# 启用并启动服务
-sudo systemctl enable litellm
-sudo systemctl start litellm
-
-# 查看状态
-sudo systemctl status litellm
-
-# 查看日志
-journalctl -u litellm -f
-```
-
-#### 步骤 5：配置 Nginx + Cloudflare SSL
-
-**5.1 生成 Cloudflare Origin Certificate**
-
-1. 登录 Cloudflare Dashboard
-2. 选择域名 → SSL/TLS → Origin Server
-3. 点击 "Create Certificate"
-4. 保存证书和私钥：
-
-```bash
-sudo mkdir -p /etc/nginx/ssl
-sudo nano /etc/nginx/ssl/origin-cert.pem     # 粘贴 Origin Certificate
-sudo nano /etc/nginx/ssl/origin-key.pem      # 粘贴 Private Key
-sudo chmod 600 /etc/nginx/ssl/origin-key.pem
-```
-
-**5.2 配置 Nginx**
-
-```bash
-# 安装 Nginx
-sudo apt install nginx
-
-# 复制配置文件
-sudo cp nginx/litellm.conf /etc/nginx/sites-available/
-
-# 修改域名（替换 llm-proxy.example.com 为你的域名）
-sudo nano /etc/nginx/sites-available/litellm.conf
-
-# 启用站点
-sudo ln -s /etc/nginx/sites-available/litellm.conf /etc/nginx/sites-enabled/
-
-# 测试配置
-sudo nginx -t
-
-# 重载 Nginx
-sudo systemctl reload nginx
-```
-
-**5.3 配置 Cloudflare SSL 模式**
-
-在 Cloudflare Dashboard 中：
-- SSL/TLS → Overview → 选择 **Full (Strict)** 模式
-
-#### 步骤 6：验证部署
-
-```bash
-# 从国内测试（通过 Cloudflare CDN）
-curl https://llm-proxy.example.com/health
-
-# 测试 LLM 调用
-curl https://llm-proxy.example.com/v1/chat/completions \
-  -H "Authorization: Bearer sk-litellm-master-xxxxx" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "router-model",
-    "messages": [{"role": "user", "content": "Hello"}]
-  }'
-```
-
----
-
-## 🔧 运维命令速查
-
-### systemd 服务管理
-
-```bash
-# 启动 / 停止 / 重启
 sudo systemctl start litellm
 sudo systemctl stop litellm
 sudo systemctl restart litellm
-
-# 查看运行状态
 sudo systemctl status litellm
-
-# 实时日志（调试利器）
-journalctl -u litellm -f
-
-# 查看最近 100 行日志
 journalctl -u litellm -n 100
+journalctl -u litellm -f
+```
 
-# 修改配置后重启
+升级 LiteLLM：
+
+```bash
+sudo -u litellm /opt/litellm-proxy/venv/bin/pip install --upgrade 'litellm[proxy]' prometheus-client
 sudo systemctl restart litellm
 ```
 
-### Nginx 管理
+## Nginx 反向代理
+
+`gateway/nginx/litellm.conf` 是生产反代模板，包含：
+
+- HTTPS 入口。
+- Cloudflare Origin Certificate 示例。
+- Cloudflare IP 白名单。
+- SSE/streaming 必要配置：`proxy_buffering off`、长 `proxy_read_timeout`。
+- `/health`、`/ui` 和普通 API 路径转发到 `127.0.0.1:4000`。
+
+安装示例：
 
 ```bash
-# 测试配置
+cd /home/Velab/gateway
+sudo apt install nginx
+sudo cp nginx/litellm.conf /etc/nginx/sites-available/litellm.conf
+sudo nano /etc/nginx/sites-available/litellm.conf
+sudo ln -s /etc/nginx/sites-available/litellm.conf /etc/nginx/sites-enabled/litellm.conf
 sudo nginx -t
-
-# 重载配置（不中断服务）
 sudo systemctl reload nginx
+```
 
-# 重启 Nginx
-sudo systemctl restart nginx
+证书示例路径：
 
-# 查看日志
+```bash
+sudo mkdir -p /etc/nginx/ssl
+sudo nano /etc/nginx/ssl/origin-cert.pem
+sudo nano /etc/nginx/ssl/origin-key.pem
+sudo chmod 600 /etc/nginx/ssl/origin-key.pem
+```
+
+Cloudflare SSL/TLS 模式应使用 `Full (strict)`。上线前把模板里的 `llm-proxy.example.com` 替换成真实域名。
+
+## 验证命令
+
+配置静态检查：
+
+```bash
+cd /home/Velab/gateway
+./scripts/validate_config.sh --verbose
+```
+
+确认本地监听：
+
+```bash
+ss -ltnp | grep ':4000'
+curl -sS http://127.0.0.1:4000/health
+```
+
+认证轻量探针，推荐用于部署验证：
+
+```bash
+source /opt/litellm-proxy/.env
+curl -sS http://127.0.0.1:4000/v1/models \
+  -H "Authorization: Bearer ${LITELLM_MASTER_KEY}"
+```
+
+经 Nginx 验证：
+
+```bash
+curl -sS https://llm-proxy.example.com/v1/models \
+  -H "Authorization: Bearer ${LITELLM_MASTER_KEY}"
+```
+
+OpenAI 兼容调用验证：
+
+```bash
+curl -sS http://127.0.0.1:4000/v1/chat/completions \
+  -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "router-model",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+```
+
+说明：
+
+- `/v1/models` 只验证网关可达和认证可用，适合 readiness。
+- `/v1/chat/completions` 会真实调用上游模型，适合上线前端到端验证。
+- `/health` 可用于 LiteLLM 进程级检查，但不要把它作为 backend `/ready` 的深度模型端点检查依据。
+
+## 与 backend /ready 的关系
+
+Backend 在场景 A 下通过 `LITELLM_BASE_URL` 和 `LITELLM_API_KEY` 访问 Gateway。
+
+推荐 backend 配置：
+
+```bash
+DEPLOYMENT_MODE=A
+LITELLM_BASE_URL=http://127.0.0.1:4000/v1
+LITELLM_API_KEY=<与 gateway LITELLM_MASTER_KEY 或 Virtual Key 对应的值>
+```
+
+如果 backend 与 gateway 不在同一台机器，`LITELLM_BASE_URL` 应改成 Nginx 暴露的 HTTPS 地址：
+
+```bash
+LITELLM_BASE_URL=https://llm-proxy.example.com/v1
+```
+
+当前 backend `/ready` 对 LiteLLM 使用：
+
+```text
+GET {LITELLM_BASE_URL}/models
+Authorization: Bearer {LITELLM_API_KEY}
+```
+
+也就是当 `LITELLM_BASE_URL=http://127.0.0.1:4000/v1` 时，实际探针为：
+
+```text
+http://127.0.0.1:4000/v1/models
+```
+
+这个设计只验证网关可达性和认证是否正确，不触发上游模型深度检查，避免 Anthropic/OpenAI 等外部供应商短时波动导致本地 backend `/ready` 被误判为不可用。
+
+## 日志与监控
+
+LiteLLM 服务日志：
+
+```bash
+journalctl -u litellm -f
+journalctl -u litellm -n 100
+journalctl -u litellm -p err
+```
+
+请求日志默认写入：
+
+```bash
+/opt/litellm-proxy/logs/request.log
+```
+
+Nginx 日志：
+
+```bash
 sudo tail -f /var/log/nginx/litellm-access.log
 sudo tail -f /var/log/nginx/litellm-error.log
 ```
 
-### 升级 LiteLLM
+Prometheus 指标：
 
 ```bash
-sudo -u litellm /opt/litellm-proxy/venv/bin/pip install --upgrade 'litellm[proxy]'
-sudo systemctl restart litellm
+curl -sS http://127.0.0.1:4000/metrics
 ```
 
-### 配置验证
+## 故障排查
+
+### litellm 服务无法启动
 
 ```bash
-# 验证配置文件语法和环境变量
-cd gateway
-./scripts/validate_config.sh
-
-# 详细输出模式
-./scripts/validate_config.sh --verbose
-
-# 验证指定配置文件
-./scripts/validate_config.sh --config /path/to/config.yaml
-```
-
-**验证内容**：
-- ✅ YAML 语法检查
-- ✅ 配置结构验证（必需字段）
-- ✅ 环境变量检查
-- ✅ API Keys 格式验证
-
----
-
-## 📊 监控与日志
-
-### 查看 LiteLLM 日志
-
-```bash
-# 实时日志
-journalctl -u litellm -f
-
-# 按时间范围查询
-journalctl -u litellm --since "2026-04-02 10:00:00" --until "2026-04-02 11:00:00"
-
-# 只看错误日志
-journalctl -u litellm -p err
-```
-
-### Prometheus 指标（可选）
-
-LiteLLM 内置 Prometheus 指标导出，访问：
-```
-http://localhost:4000/metrics
-```
-
-关键指标：
-- `litellm_requests_total` - 总请求数
-- `litellm_spend_total` - 总花费
-- `litellm_deployment_failure_total` - 失败次数
-
----
-
-## 🔐 安全最佳实践
-
-1. **API Keys 保护**
-   - `.env` 文件权限设置为 `600`
-   - 不要提交 `.env` 到版本库
-   - 定期轮换 API Keys
-
-2. **网络安全**
-   - Nginx 配置中已限制仅允许 Cloudflare IP 访问
-   - 定期更新 Cloudflare IP 白名单
-
-3. **服务隔离**
-   - LiteLLM 运行在专用用户 `litellm` 下
-   - systemd 配置了安全加固选项
-
-4. **日志审计**
-   - 所有请求都记录在 Nginx access log
-   - journald 保留 systemd 服务日志
-
----
-
-## 🚨 故障排查
-
-### 问题 1：服务无法启动
-
-```bash
-# 查看详细错误
-journalctl -u litellm -n 50
-
-# 常见原因：
-# - .env 文件缺失或格式错误
-# - API Keys 未配置
-# - 端口 4000 被占用
-```
-
-### 问题 2：Nginx 502 Bad Gateway
-
-```bash
-# 检查 LiteLLM 服务是否运行
 sudo systemctl status litellm
-
-# 检查端口监听
-sudo netstat -tlnp | grep 4000
-
-# 查看 Nginx 错误日志
-sudo tail -f /var/log/nginx/litellm-error.log
+journalctl -u litellm -n 100
+sudo -u litellm test -r /opt/litellm-proxy/.env && echo ok
 ```
 
-### 问题 3：LLM API 调用失败
+常见原因：
+
+- `/opt/litellm-proxy/.env` 不存在、权限错误或仍是占位值。
+- `config.yaml` 引用的环境变量缺失。
+- `127.0.0.1:4000` 已被占用。
+- 虚拟环境依赖安装不完整。
+
+### Nginx 返回 502
 
 ```bash
-# 查看 LiteLLM 日志
-journalctl -u litellm -f
-
-# 常见原因：
-# - API Keys 无效或过期
-# - 网络连接问题（检查服务器到 api.anthropic.com / api.openai.com 的连通性）
-# - 速率限制（429 错误）
+sudo systemctl status litellm
+ss -ltnp | grep ':4000'
+sudo nginx -t
+sudo tail -n 100 /var/log/nginx/litellm-error.log
 ```
 
----
+常见原因：
 
-## 🔗 相关文档
+- LiteLLM 未监听 `127.0.0.1:4000`。
+- Nginx `proxy_pass` 端口与 `.env` 中 `PORT` 不一致。
+- systemd 服务启动失败但 Nginx 仍在转发。
 
-- [LiteLLM 官方文档](https://docs.litellm.ai/)
-- [FOTA_LLM_API中转方案.md](../docs/FOTA_LLM_API中转方案.md) - 完整架构设计
-- [LLM_429限流防御方案.md](../docs/LLM_429限流防御方案.md) - 限流防御策略
+### 返回 401 或 403
 
----
+```bash
+source /opt/litellm-proxy/.env
+curl -i http://127.0.0.1:4000/v1/models \
+  -H "Authorization: Bearer ${LITELLM_MASTER_KEY}"
+```
 
-## 📝 核心特性
+常见原因：
 
-- ✅ **统一协议**：将 Claude / OpenAI 等模型统一为 OpenAI 格式接口
-- ✅ **自动 Fallback**：Claude 触发 429 时自动切换到 OpenAI
-- ✅ **Key Pool 轮转**：多个 API Key 负载均衡，提升并发能力
-- ✅ **重试机制**：自带请求重试与超时保护
-- ✅ **跨境优化**：部署在海外服务器，减少跨境请求次数
-- ✅ **安全加固**：Cloudflare SSL + IP 白名单 + systemd 安全选项
+- backend 的 `LITELLM_API_KEY` 与 gateway 的 `LITELLM_MASTER_KEY` 或 Virtual Key 不一致。
+- 请求头缺少 `Authorization: Bearer ...`。
+- 经 Cloudflare/Nginx 访问时源站白名单或 Host 配置不匹配。
 
----
+### chat/completions 失败但 /v1/models 正常
 
-## 📞 技术支持
+```bash
+journalctl -u litellm -f
+curl -I https://api.anthropic.com
+curl -I https://api.openai.com
+```
 
-如有问题，请查看：
-1. 本 README 的故障排查章节
-2. LiteLLM 官方文档
-3. 项目 docs 目录下的详细设计文档
+常见原因：
+
+- 上游供应商 Key 无效或余额/额度不足。
+- 上游网络不可达。
+- 上游返回 429，需观察 Key Pool 和 Fallback 是否按预期生效。
+- 模型名或供应商侧模型权限不匹配。
+
+### backend /ready 返回 not_ready
+
+```bash
+curl -sS http://127.0.0.1:4000/v1/models \
+  -H "Authorization: Bearer ${LITELLM_MASTER_KEY}"
+curl -sS http://127.0.0.1:8000/ready
+```
+
+排查顺序：
+
+1. 先确认 gateway `/v1/models` 本地探针成功。
+2. 再确认 backend `.env` 中 `LITELLM_BASE_URL` 以 `/v1` 结尾。
+3. 再确认 backend `LITELLM_API_KEY` 与 gateway 授权 Key 一致。
+4. 最后看 backend `/ready` 响应里的 `checks.litellm_gateway` 字段。
+
+## 相关文件
+
+- [config.yaml](config.yaml)
+- [.env.example](.env.example)
+- [deploy.sh](scripts/deploy.sh)
+- [litellm.service](systemd/litellm.service)
+- [litellm.conf](nginx/litellm.conf)

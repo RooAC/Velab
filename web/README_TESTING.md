@@ -1,411 +1,231 @@
-# Velab Web 前端测试文档
+# Velab Web 测试与覆盖率文档
 
-## 概述
-
-本文档描述了 Velab 项目 Web 前端的完整测试套件，包括测试配置、运行方法、覆盖率要求和最佳实践。
+本文档描述 `web` 子项目的测试配置、运行命令、覆盖率门禁和 BFF/API 测试约定。所有命令默认在 `/home/Velab/web` 下执行。
 
 ## 测试技术栈
 
-- **测试框架**: Vitest 4.1.2
-- **组件测试**: React Testing Library 16.3.2
-- **API 模拟**: MSW (Mock Service Worker) 2.12.14
-- **用户交互**: @testing-library/user-event 14.6.1
-- **覆盖率工具**: @vitest/coverage-v8 4.1.2
-- **可视化界面**: @vitest/ui 4.1.2
-- **类型支持**: TypeScript 6.0.2
+| 类别 | 工具 |
+| --- | --- |
+| 测试框架 | Vitest 4.1.2 |
+| React 组件测试 | React Testing Library 16.3.2 |
+| 用户交互 | `@testing-library/user-event` 14.6.1 |
+| API Mock | MSW 2.12.14 |
+| 覆盖率 | `@vitest/coverage-v8` 4.1.2 |
+| DOM 环境 | jsdom 29.0.1 |
+| UI 调试 | `@vitest/ui` 4.1.2 |
 
-## 项目结构
+## 命令
 
-```
-web/
-├── vitest.config.ts            # Vitest 配置文件
-├── vitest.setup.ts             # Vitest 设置文件
-├── src/
-│   ├── __tests__/              # 测试工具和 Mock
-│   │   ├── mocks/
-│   │   │   ├── data.ts         # 测试数据 Mock
-│   │   │   ├── handlers.ts     # MSW 请求处理器
-│   │   │   └── server.ts       # MSW 服务器配置
-│   │   ├── utils/
-│   │   │   └── test-utils.tsx  # 测试工具函数
-│   │   └── setup.d.ts          # TypeScript 类型声明
-│   ├── components/
-│   │   └── __tests__/          # 组件测试
-│   │       ├── ChatMessage.test.tsx
-│   │       ├── ThinkingProcess.test.tsx
-│   │       ├── InputBar.test.tsx
-│   │       ├── Header.test.tsx
-│   │       ├── WelcomePage.test.tsx
-│   │       └── FeedbackButtons.test.tsx
-│   ├── app/
-│   │   ├── __tests__/
-│   │   │   └── page.test.tsx   # 主页面集成测试
-│   │   └── api/
-│   │       └── chat/
-│   │           └── __tests__/
-│   │               └── route.test.ts  # API 路由测试
-│   └── lib/
-│       └── __tests__/
-│           └── sseParse.test.ts       # SSE 解析器测试
-```
-
-## 测试命令
-
-### 运行所有测试
 ```bash
+cd /home/Velab/web
+
+# 运行全部测试
 npm test
-```
 
-### 监听模式（开发时使用）
-```bash
+# 开发时监听
 npm run test:watch
-```
 
-### 生成覆盖率报告
-```bash
+# 生成覆盖率报告
 npm run test:coverage
-```
 
-### 可视化测试界面
-```bash
+# CI 覆盖率门禁
+npm run test:ci
+
+# Vitest UI
 npm run test:ui
 ```
 
-## 测试覆盖率
+运行覆盖率后，HTML 报告位于：
 
-### 当前目标
-
-- **分支覆盖率**: ≥ 70%
-- **函数覆盖率**: ≥ 70%
-- **行覆盖率**: ≥ 80%
-- **语句覆盖率**: ≥ 80%
-
-### 查看覆盖率报告
-
-运行 `npm run test:coverage` 后，可以通过以下方式查看报告：
-
-1. **终端输出**: 直接在终端查看汇总信息
-2. **HTML 报告**: 打开 `coverage/lcov-report/index.html` 查看详细报告
-
-## 测试分类
-
-### 1. 组件测试
-
-#### ChatMessage 组件
-- ✅ 用户消息和助手消息渲染
-- ✅ Markdown 解析（标题、列表、代码块、表格等）
-- ✅ Thinking Process 展示
-- ✅ 流式输出动画
-- ✅ 反馈按钮显示逻辑
-
-#### ThinkingProcess 组件
-- ✅ 展开/折叠交互
-- ✅ Agent 步骤状态显示（pending、running、completed）
-- ✅ 状态图标渲染
-- ✅ 当前步骤高亮
-
-#### InputBar 组件
-- ✅ 文本输入和提交
-- ✅ Run/Stop 按钮切换
-- ✅ 输入验证（空消息、空格）
-- ✅ 键盘交互（Enter 提交）
-- ✅ 按钮状态管理
-
-#### Header 组件
-- ✅ 场景下拉菜单
-- ✅ 场景切换功能
-- ✅ 点击外部关闭菜单
-- ✅ 当前场景高亮
-
-#### WelcomePage 组件
-- ✅ 预设问题渲染
-- ✅ 问题点击交互
-- ✅ 响应式布局
-
-#### FeedbackButtons 组件
-- ✅ 复制功能和状态
-- ✅ 点赞/点踩互斥逻辑
-- ✅ 按钮状态切换
-
-### 2. 集成测试
-
-#### 主页面 (page.tsx)
-- ✅ 完整的消息发送流程
-- ✅ SSE 流式数据处理
-- ✅ 场景切换和消息清空
-- ✅ Stop 功能
-- ✅ 错误处理
-- ✅ 自动滚动
-
-### 3. API 测试
-
-#### /api/chat 路由
-- ✅ 请求转发到后端
-- ✅ SSE 流式响应
-- ✅ 错误处理（网络错误、超时、后端错误）
-- ✅ 请求体验证
-
-### 4. 工具函数测试
-
-#### SSE 解析器 (sseParse.ts)
-- ✅ 单个和多个事件解析
-- ✅ 不完整事件处理
-- ✅ 多种行结束符支持
-- ✅ 注释过滤
-- ✅ 增量解析
-
-## 测试最佳实践
-
-### 1. AAA 模式
-
-所有测试遵循 **Arrange-Act-Assert** 模式：
-
-```typescript
-it('应该正确渲染用户消息', () => {
-  // Arrange - 准备测试数据
-  const message = { role: 'user', content: 'Test' }
-  
-  // Act - 执行操作
-  render(<ChatMessage message={message} />)
-  
-  // Assert - 验证结果
-  expect(screen.getByText('Test')).toBeInTheDocument()
-})
+```bash
+xdg-open coverage/index.html
 ```
 
-### 2. 测试隔离
+## 覆盖率门禁
 
-每个测试应该独立运行，不依赖其他测试：
+门禁配置在 `vitest.config.ts`：
 
-```typescript
-beforeEach(() => {
-  jest.clearAllMocks()
-})
+| 指标 | 阈值 |
+| --- | --- |
+| branches | `>= 70%` |
+| functions | `>= 70%` |
+| lines | `>= 80%` |
+| statements | `>= 80%` |
+
+覆盖率排除项包括 `node_modules/`、`.next/`、构建输出、配置文件、类型声明、`src/__tests__/**` 测试辅助代码，以及当前主页面入口 `src/app/page.tsx`。
+
+## 测试结构
+
+```text
+web/
+├── vitest.config.ts
+├── vitest.setup.ts
+└── src/
+    ├── __tests__/
+    │   ├── mocks/             # MSW handlers 与测试数据
+    │   ├── utils/             # render helper
+    │   └── setup.d.ts
+    ├── app/
+    │   ├── __tests__/         # 页面集成与 SSE 事件测试
+    │   └── api/
+    │       ├── auth/          # Web 登录 / 状态 / 登出路由测试
+    │       └── chat/          # BFF chat 代理测试
+    ├── components/
+    │   └── __tests__/         # 组件测试
+    └── lib/
+        └── __tests__/         # SSE、鉴权、路由校验等工具测试
 ```
 
-### 3. 用户视角测试
+## BFF/API 测试约定
 
-优先使用用户可见的元素进行查询：
+Web 的浏览器侧请求应落到同源 `/api/*`，测试也应优先覆盖这个边界。MSW 用于模拟 backend，不需要真实 backend 进程。
 
-```typescript
-// ✅ 好的做法
-screen.getByRole('button', { name: 'Submit' })
-screen.getByText('Welcome')
-screen.getByPlaceholderText('Enter text')
+当前核心代理关系：
 
-// ❌ 避免使用
-container.querySelector('.submit-button')
-```
+| Web BFF 路由 | backend 上游 | 测试重点 |
+| --- | --- | --- |
+| `POST /api/chat` | `${BACKEND_URL}/chat` | 请求校验、鉴权头转发、SSE 透传、错误处理 |
+| `POST /api/upload-log` | `${BACKEND_URL}/api/bundles` | 文件上传、状态码与错误响应 |
+| `GET /api/bundle-*` | `${BACKEND_URL}/api/bundles/*` | 查询参数透传、404/5xx 处理 |
+| `/api/sessions*` | `${BACKEND_URL}/api/sessions*` | 会话 CRUD 转发 |
+| `/api/docs*` | `${BACKEND_URL}/api/docs*` | 文档列表、上传、删除 |
+| `/api/auth/*` | Web 本地鉴权路由 | cookie、登录开关、密码校验 |
 
-### 4. 异步操作
-
-使用 `waitFor` 处理异步更新：
-
-```typescript
-await waitFor(() => {
-  expect(screen.getByText('Loaded')).toBeInTheDocument()
-})
-```
-
-### 5. 用户交互
-
-使用 `userEvent` 模拟真实用户操作：
+测试环境可用 `vi.stubEnv` 设置环境变量，例如：
 
 ```typescript
-const user = userEvent.setup()
-await user.type(input, 'Hello')
-await user.click(button)
+vi.stubEnv("BACKEND_URL", "http://localhost:8000");
+vi.stubEnv("WEB_AUTH_ENABLED", "true");
+vi.stubEnv("BACKEND_API_KEY", "test-backend-key");
 ```
 
-## Mock 策略
+不要在测试中写入真实密钥；测试 key 只能是占位值。
 
-### 1. API Mock (MSW)
+## Backend ready 联动的测试边界
 
-使用 MSW 模拟后端 API：
+`/backend-api/health` 与 `/backend-api/ready` 是生产 Nginx 暴露的 backend 探针路径，不属于 Next.js BFF 本身。Web 单元测试通常不启动 Nginx，也不应依赖真实 `/backend-api/*`。
+
+发布验证或端到端排障时使用：
+
+```bash
+curl -fsS http://<web-domain>/backend-api/health
+curl -fsS http://<web-domain>/backend-api/ready
+```
+
+本地只验证 backend 进程时使用：
+
+```bash
+curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8000/ready
+```
+
+如果要为 ready 联动增加自动化测试，建议放在部署或端到端层，而不是 Vitest 的组件/BFF 单元测试里。
+
+## 编写测试的约定
+
+### 组件测试
+
+- 优先使用用户可见语义查询，例如 `getByRole`、`getByText`、`getByPlaceholderText`。
+- 用 `userEvent` 模拟用户输入和点击。
+- 异步状态用 `await waitFor(...)` 或 `findBy...`。
+- 避免依赖 CSS class 或内部 DOM 结构。
 
 ```typescript
-// handlers.ts
-export const handlers = [
-  http.post('/api/chat', async ({ request }) => {
-    return createSSEResponse(mockEvents)
-  }),
-]
+const user = userEvent.setup();
+render(<InputBar onSend={onSend} disabled={false} />);
+
+await user.type(screen.getByPlaceholderText(/输入/), "诊断一下");
+await user.click(screen.getByRole("button", { name: /发送/ }));
+
+expect(onSend).toHaveBeenCalledWith("诊断一下");
 ```
 
-### 2. 组件 Mock
+### API 路由测试
 
-对于复杂的子组件，可以使用 Jest mock：
+- 使用 `NextRequest` 构造请求。
+- 使用 `vi.stubEnv` 控制 `BACKEND_URL`、鉴权开关和 API Key。
+- 使用 `vi.stubGlobal("fetch", ...)` 或 MSW 模拟上游。
+- 覆盖成功、上游错误、网络错误、请求体验证失败和鉴权分支。
 
-```typescript
-jest.mock('@/components/ComplexComponent', () => ({
-  __esModule: true,
-  default: () => <div>Mocked Component</div>,
-}))
-```
+### SSE 测试
 
-### 3. 环境变量
-
-在 [`vitest.setup.ts`](vitest.setup.ts:1) 中配置测试环境变量：
-
-```typescript
-process.env.NEXT_PUBLIC_BACKEND_URL = 'http://localhost:8000'
-```
+- 覆盖完整事件、不完整 chunk、`\r\n` 行结束符、注释行和增量解析。
+- 对 `/api/chat`，同时验证 `Content-Type: text/event-stream` 和错误路径。
 
 ## 常见问题
 
-### 1. 测试超时
+### 测试超时
 
-如果测试超时，增加超时时间：
-
-```typescript
-it('长时间运行的测试', async () => {
-  // 测试代码
-}, 10000) // 10 秒超时
-```
-
-### 2. 异步状态更新
-
-使用 `waitFor` 等待状态更新：
+Vitest 默认 `testTimeout` 和 `hookTimeout` 为 10 秒。单个测试需要更长时间时：
 
 ```typescript
-await waitFor(() => {
-  expect(screen.getByText('Updated')).toBeInTheDocument()
-})
+it("长时间运行的测试", async () => {
+  // ...
+}, 15000);
 ```
 
-### 3. 清理定时器
-
-测试中使用定时器时，记得清理：
+### 定时器测试不稳定
 
 ```typescript
-jest.useFakeTimers()
-// 测试代码
-jest.advanceTimersByTime(2000)
-jest.useRealTimers()
+vi.useFakeTimers();
+// 触发逻辑
+await vi.runOnlyPendingTimersAsync();
+vi.useRealTimers();
 ```
 
-### 4. TypeScript 类型错误
-
-确保导入了类型声明：
+### 环境变量污染
 
 ```typescript
-import '@testing-library/jest-dom'
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 ```
 
-## 持续集成
+### 只运行一个测试文件或名称
 
-### GitHub Actions 配置示例
+```bash
+npm test -- src/lib/__tests__/sseParse.test.ts
+npm test -- --testNamePattern="SSE"
+```
+
+## CI 示例
 
 ```yaml
-name: Tests
+name: web-tests
 
 on: [push, pull_request]
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm run test:ci
-      - uses: codecov/codecov-action@v3
-        with:
-          files: ./coverage/lcov.info
 ```
 
-## 调试技巧
-
-### 1. 查看渲染结果
-
-```typescript
-const { debug } = render(<Component />)
-debug() // 打印当前 DOM 结构
-```
-
-### 2. 查询失败时的建议
-
-```typescript
-screen.getByRole('button') // 失败时会显示所有可用的 role
-```
-
-### 3. 测试特定场景
+## 发布前建议
 
 ```bash
-npm test -- --testNamePattern="应该正确渲染"
+cd /home/Velab/web
+npm run build
+npm run test:ci
 ```
 
-### 4. 更新快照
+发布后再做运行态探针：
 
 ```bash
-npm test -- -u
+curl -fsS http://127.0.0.1:3000/
+curl -fsS http://<web-domain>/backend-api/ready
 ```
 
-## 性能优化
-
-### 1. 并行运行
-
-Jest 默认并行运行测试，可以通过 `--maxWorkers` 调整：
-
-```bash
-npm test -- --maxWorkers=4
-```
-
-### 2. 只运行变更的测试
-
-```bash
-npm test -- --onlyChanged
-```
-
-### 3. 缓存
-
-Jest 会自动缓存测试结果，加速后续运行。
-
-## 贡献指南
-
-### 添加新测试
-
-1. 在相应目录创建 `*.test.tsx` 或 `*.test.ts` 文件
-2. 遵循现有的测试结构和命名规范
-3. 确保测试覆盖率不降低
-4. 运行 `npm test` 确保所有测试通过
-
-### 测试命名规范
-
-- 使用中文描述测试场景
-- 使用 `应该...` 开头描述预期行为
-- 分组相关测试使用 `describe`
-
-```typescript
-describe('组件名称', () => {
-  describe('功能分类', () => {
-    it('应该执行某个操作', () => {
-      // 测试代码
-    })
-  })
-})
-```
-
-## 参考资源
-
-- [Vitest 官方文档](https://vitest.dev/)
-- [React Testing Library 文档](https://testing-library.com/react)
-- [MSW 文档](https://mswjs.io/)
-- [Testing Library 最佳实践](https://kentcdodds.com/blog/common-mistakes-with-react-testing-library)
-
-## 更新日志
-
-### 2026-04-03
-- ✅ 初始化测试套件
-- ✅ 配置 Jest 和 React Testing Library
-- ✅ 添加所有组件测试
-- ✅ 添加集成测试和 API 测试
-- ✅ 配置 MSW 用于 API 模拟
-- ✅ 设置测试覆盖率目标
-
----
-
-**维护者**: FOTA 诊断平台团队  
-**最后更新**: 2026-04-03
+**最后更新**: 2026-06-04
