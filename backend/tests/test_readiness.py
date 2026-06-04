@@ -87,7 +87,7 @@ def test_ready_returns_503_when_database_is_unavailable(client, monkeypatch):
     }
 
 
-def test_litellm_health_url_strips_openai_v1_path(monkeypatch):
+def test_litellm_probe_url_uses_openai_models_path(monkeypatch):
     import main
     from config import settings
 
@@ -98,4 +98,4 @@ def test_litellm_health_url_strips_openai_v1_path(monkeypatch):
         raising=False,
     )
 
-    assert main._litellm_health_url() == "http://127.0.0.1:4000/health"
+    assert main._litellm_probe_url() == "http://127.0.0.1:4000/v1/models"

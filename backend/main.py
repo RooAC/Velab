@@ -330,24 +330,22 @@ def _check_agents() -> dict[str, Any]:
         return {"status": "failed", "error": type(exc).__name__}
 
 
-def _litellm_health_url() -> str | None:
+def _litellm_probe_url() -> str | None:
     if not settings.LITELLM_BASE_URL:
         return None
 
     parts = urlsplit(settings.LITELLM_BASE_URL)
     path_parts = [part for part in parts.path.split("/") if part]
-    if path_parts and path_parts[-1] == "v1":
-        path_parts = path_parts[:-1]
-    health_path = "/" + "/".join([*path_parts, "health"])
-    return urlunsplit((parts.scheme, parts.netloc, health_path, "", ""))
+    models_path = "/" + "/".join([*path_parts, "models"])
+    return urlunsplit((parts.scheme, parts.netloc, models_path, "", ""))
 
 
 async def _check_litellm_gateway() -> dict[str, Any]:
     if getattr(settings.DEPLOYMENT_MODE, "value", settings.DEPLOYMENT_MODE) != "A":
         return {"status": "skipped", "reason": "deployment_mode_b"}
 
-    health_url = _litellm_health_url()
-    if not health_url:
+    probe_url = _litellm_probe_url()
+    if not probe_url:
         return {"status": "failed", "error": "MissingLiteLLMBaseUrl"}
     if not settings.LITELLM_API_KEY:
         return {"status": "failed", "error": "MissingLiteLLMApiKey"}
@@ -355,7 +353,7 @@ async def _check_litellm_gateway() -> dict[str, Any]:
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             response = await client.get(
-                health_url,
+                probe_url,
                 headers={"Authorization": f"Bearer {settings.LITELLM_API_KEY}"},
             )
         if 200 <= response.status_code < 300:
