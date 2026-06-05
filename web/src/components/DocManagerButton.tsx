@@ -87,7 +87,7 @@ export default function DocManagerButton() {
       const resp = await fetch("/api/docs", { method: "POST", body: fd });
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({}));
-        setError(body.detail || `上传失败 (${resp.status})`);
+        setError(body.detail || body?.error?.message || body.error || `上传失败 (${resp.status})`);
       } else {
         await refresh();
       }
@@ -106,7 +106,7 @@ export default function DocManagerButton() {
       const resp = await fetch(`/api/docs/${docId}`, { method: "DELETE" });
       if (!resp.ok && resp.status !== 204) {
         const body = await resp.json().catch(() => ({}));
-        setError(body.detail || `删除失败 (${resp.status})`);
+        setError(body.detail || body?.error?.message || body.error || `删除失败 (${resp.status})`);
       } else {
         await refresh();
       }

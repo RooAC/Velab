@@ -41,7 +41,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       body: JSON.stringify({ password }),
     });
     if (!resp.ok) {
-      setError("密码不正确或登录未配置");
+      const body = await resp.json().catch(() => ({}));
+      setError(body?.error?.message || body.detail || "密码不正确或登录未配置");
       return;
     }
     setState("authenticated");
@@ -62,10 +63,11 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       >
         <h1 className="text-base font-semibold">Velab</h1>
         <div className="mt-4">
-          <label className="block text-xs mb-1" style={{ color: "var(--text-secondary)" }}>
+          <label htmlFor="auth-password" className="block text-xs mb-1" style={{ color: "var(--text-secondary)" }}>
             访问密码
           </label>
           <input
+            id="auth-password"
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}

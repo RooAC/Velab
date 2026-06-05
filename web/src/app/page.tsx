@@ -1165,7 +1165,21 @@ export default function Home() {
         signal: abortController.signal,
       });
 
-      if (!response.body) return;
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        const message = String(
+          payload?.detail
+          || (typeof payload?.error === "object" && payload?.error
+            ? (payload.error as { message?: string }).message
+            : payload?.error)
+          || `请求失败 (${response.status})`
+        );
+        throw new Error(message);
+      }
+
+      if (!response.body) {
+        throw new Error("后端响应为空");
+      }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -1193,13 +1207,16 @@ export default function Home() {
     } catch (err) {
       if ((err as Error).name === "AbortError") return;
       console.error("Stream error:", err);
+      const message = err instanceof Error && err.message
+        ? `抱歉，处理请求时出现错误：${err.message}`
+        : "抱歉，处理请求时出现错误。请重试。";
       setIsRunning(false);
       updateSessionMessages(targetSessionId, (prev) =>
         prev.map((m) =>
           m.id === assistantId
             ? {
                 ...m,
-                content: "抱歉，处理请求时出现错误。请重试。",
+                content: message,
                 isStreaming: false,
               }
             : m

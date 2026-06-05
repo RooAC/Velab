@@ -9,12 +9,15 @@ class _FakeSession:
 
 
 class _FakeTaskClient:
-    async def get_queue_info(self) -> dict:
-        return {
+    def __init__(self, queue_info: dict | None = None):
+        self.queue_info = queue_info or {
             "queue_length": 0,
             "redis_host": "localhost",
             "redis_port": 6379,
         }
+
+    async def get_queue_info(self) -> dict:
+        return self.queue_info
 
 
 def _patch_ready_dependencies(monkeypatch):
@@ -84,6 +87,63 @@ def test_ready_returns_503_when_database_is_unavailable(client, monkeypatch):
     assert payload["checks"]["database"] == {
         "status": "failed",
         "error": "RuntimeError",
+    }
+
+
+def test_ready_returns_503_when_redis_queue_fails(client, monkeypatch):
+    import tasks.client as tasks_client
+
+    _patch_ready_dependencies(monkeypatch)
+
+    async def _get_task_client():
+        return _FakeTaskClient({"error": "redis down"})
+
+    monkeypatch.setattr(tasks_client, "get_task_client", _get_task_client)
+
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["status"] == "not_ready"
+    assert payload["checks"]["redis_queue"] == {
+        "status": "failed",
+        "error": "RedisQueueError",
+    }
+
+
+def test_ready_returns_503_when_log_pipeline_state_is_missing(client, monkeypatch):
+    import main
+
+    _patch_ready_dependencies(monkeypatch)
+    monkeypatch.delattr(main.app.state, "range_query", raising=False)
+
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["status"] == "not_ready"
+    assert payload["checks"]["log_pipeline"]["status"] == "failed"
+    assert "range_query" in payload["checks"]["log_pipeline"]["missing"]
+
+
+def test_ready_returns_503_when_litellm_gateway_rejects_auth(client, monkeypatch):
+    import main
+
+    _patch_ready_dependencies(monkeypatch)
+
+    async def _gateway_unauthorized():
+        return {"status": "failed", "status_code": 401}
+
+    monkeypatch.setattr(main, "_check_litellm_gateway", _gateway_unauthorized)
+
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["status"] == "not_ready"
+    assert payload["checks"]["llm_gateway"] == {
+        "status": "failed",
+        "status_code": 401,
     }
 
 

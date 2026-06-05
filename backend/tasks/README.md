@@ -13,7 +13,7 @@
 │   Frontend   │ ──────────────────▶ │  FastAPI app │ ─────────▶ │    Redis     │
 └──────────────┘                     └──────────────┘            │  (Arq queue) │
         │                                    │                   └──────┬───────┘
-        │ poll /api/bundles/{id}             │ background_tasks         │
+        │ poll /api/bundles/{id}             │ register bundle          │
         │       (every 1s)                   ▼                          │ pop
         │                            ┌──────────────┐         ┌────────▼────────┐
         └──────────────────────────▶ │ SQLite       │◀────────│   Arq Worker    │
@@ -24,7 +24,7 @@
                                      └──────────────┘
 ```
 
-> 注：当前 `backend/api/__init__.py` 挂载的是 log_pipeline 自己的 `/api/bundles` 路由。该路由上传后会在 FastAPI `BackgroundTasks` 中运行同一份 `IngestPipeline.run`。Arq worker 仍作为生产服务存在，用于需要显式入队的异步摄取路径、任务进度缓存和后续队列化扩展。
+> 注：当前 `backend/api/__init__.py` 挂载的是 log_pipeline 自己的 `/api/bundles` 路由。该路由只负责保存上传文件、注册 `bundle_id` 并提交 Arq 任务；实际 `IngestPipeline.run` 统一由 `fota-worker` 执行，避免长任务占用 Uvicorn worker。
 
 ## 组件
 
@@ -32,7 +32,7 @@
 
 | 名字 | 作用 |
 |---|---|
-| `parse_bundle_task(ctx, case_id, upload_path, upload_name)` | Arq 任务函数。`asyncio.to_thread(pipeline.run, ...)` 跑解析；并行起一个 `_poll_progress()` task 把 catalog 中的进度写回 Redis |
+| `parse_bundle_task(ctx, bundle_id, upload_path, upload_name)` | Arq 任务函数。复用 HTTP 入口已注册的 `bundle_id`，`asyncio.to_thread(pipeline.run, ...)` 跑解析；并行起一个 `_poll_progress()` task 把 catalog 中的进度写回 Redis |
 | `WorkerSettings` | Arq Worker 配置：Redis 连接、`functions=[parse_bundle_task]`、`max_jobs=10`、`job_timeout=3600`、`max_tries=3` |
 | `cleanup_old_tasks` | 占位定时任务（cron 每天 02:00） |
 
@@ -40,7 +40,7 @@
 
 | 方法 | 作用 |
 |---|---|
-| `submit_bundle_task(case_id, upload_path, upload_name) → task_id` | 入队 + 写初始 `task_progress:{task_id}={percent:5, stage:"queued"}` |
+| `submit_bundle_task(bundle_id, upload_path, upload_name) → task_id` | 入队 + 写初始 `task_progress:{task_id}={percent:5, stage:"queued"}` |
 | `get_task_status(task_id)` | 读 Arq job 状态 + Redis 中的 progress；返回 `{task_id, status, enqueue_time, start_time, finish_time, progress, result?, error?}` |
 | `cancel_task(task_id)` | `Job(task_id).abort()` |
 | `get_queue_info()` | `ZCARD arq:queue` 等队列统计 |
@@ -75,11 +75,11 @@ sudo journalctl -u fota-worker -f
 
 #### 1. 上传 bundle（提交 Arq 任务）
 
-通过 `/api/bundles` 上传时，FastAPI 会起一个 `BackgroundTask` 调用 `IngestPipeline`，不直接走 Arq。需要显式 Arq 入队时，由调用方使用 `tasks.client.TaskClient.submit_bundle_task(...)`，或通过上层服务封装后再入队。
+通过 `/api/bundles` 上传时，FastAPI 会将文件落盘并在 SQLite catalog 中注册 `bundle_id`，随后调用 `tasks.client.TaskClient.submit_bundle_task(...)` 入队。HTTP 请求返回后，解析由 `fota-worker` 异步执行。
 
 ```bash
 curl -F "file=@/path/to/bundle.zip" http://localhost:8000/api/bundles
-# → {"bundle_id": "550e8400-e29b-41d4-a716-446655440000", "status": "queued"}
+# → {"bundle_id": "550e8400-e29b-41d4-a716-446655440000", "task_id": "arq-job-id", "status": "queued"}
 ```
 
 #### 2. 查询进度（前端推荐路径 —— 直接读 catalog）
@@ -217,15 +217,14 @@ echo $REDIS_HOST $REDIS_PORT
 
 1. **生产环境用 systemd 管理 Worker**，配置 `Restart=always`
 2. **`job_timeout` 按最大 bundle 设置**：默认 3600s（1h）足够 2 GB bundle
-3. **`max_tries=3` + 失败重试默认开启** —— log_pipeline 是幂等的，重跑安全（但会复用旧 bundle_id 还是新分配，取决于上层入参；当前是新分配）
+3. **`max_tries=3` + 失败重试默认开启** —— worker 复用上传入口已注册的 `bundle_id`，重试会更新同一条 catalog 记录
 4. **`task_progress:{id}` 设了 1h TTL**，超时后前端只能查 `/api/bundles/{id}` 拿状态（catalog 永久保留）
 5. **监控队列长度**：`ZCARD arq:queue` > 50 时考虑加 Worker
 6. **Redis 持久化打开**（AOF / RDB），防止任务丢失
-7. **大 bundle 上传走 Arq，小 bundle 直接走 BackgroundTasks**（HTTP 同步快，不占队列槽位）
+7. **所有 bundle 解析统一走 Arq**，HTTP 进程只负责上传落盘、注册记录和提交任务
 
 ## 相关文档
 
 - [`../log_pipeline/CLAUDE.md`](../log_pipeline/CLAUDE.md) — 摄取管线设计契约（必读）
 - [Arq 官方文档](https://arq-docs.helpmanual.io/)
 - [Redis 文档](https://redis.io/documentation)
-- [FastAPI 后台任务](https://fastapi.tiangolo.com/tutorial/background-tasks/)

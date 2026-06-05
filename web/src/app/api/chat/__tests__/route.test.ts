@@ -19,6 +19,53 @@ describe('API Route: /api/chat', () => {
 
     afterEach(() => {
         vi.unstubAllGlobals()
+        vi.unstubAllEnvs()
+    })
+
+    it('auth misconfig 时返回 503 且不 fetch backend', async () => {
+        vi.stubEnv('WEB_AUTH_ENABLED', 'true')
+        vi.stubEnv('AUTH_SESSION_SECRET', '')
+        vi.stubEnv('AUTH_LOGIN_PASSWORD', '')
+        vi.stubEnv('BACKEND_API_KEY', '')
+
+        const request = new NextRequest('http://localhost:3000/api/chat', {
+            method: 'POST',
+            body: JSON.stringify({
+                message: 'Test',
+                scenarioId: 'test',
+                history: [],
+            }),
+        })
+
+        const response = await POST(request)
+
+        expect(response.status).toBe(503)
+        const body = await response.json()
+        expect(body.error.code).toBe('AUTH_NOT_CONFIGURED')
+        expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('缺少 session cookie 时返回 UNAUTHORIZED 且不 fetch backend', async () => {
+        vi.stubEnv('WEB_AUTH_ENABLED', 'true')
+        vi.stubEnv('AUTH_SESSION_SECRET', 'session-secret')
+        vi.stubEnv('AUTH_LOGIN_PASSWORD', 'login-password')
+        vi.stubEnv('BACKEND_API_KEY', '')
+
+        const request = new NextRequest('http://localhost:3000/api/chat', {
+            method: 'POST',
+            body: JSON.stringify({
+                message: 'Test',
+                scenarioId: 'test',
+                history: [],
+            }),
+        })
+
+        const response = await POST(request)
+
+        expect(response.status).toBe(401)
+        const body = await response.json()
+        expect(body.error.code).toBe('UNAUTHORIZED')
+        expect(mockFetch).not.toHaveBeenCalled()
     })
 
     describe('成功响应', () => {
@@ -55,6 +102,38 @@ describe('API Route: /api/chat', () => {
             )
 
             expect(response.headers.get('Content-Type')).toBe('text/event-stream')
+        })
+
+        it('设置 BACKEND_API_KEY 时应该转发 Authorization header', async () => {
+            vi.stubEnv('BACKEND_API_KEY', 'backend-secret')
+            const mockStream = new ReadableStream()
+            mockFetch.mockResolvedValue({
+                ok: true,
+                body: mockStream,
+            })
+
+            const request = new NextRequest('http://localhost:3000/api/chat', {
+                method: 'POST',
+                body: JSON.stringify({
+                    message: 'Test message',
+                    scenarioId: 'test-scenario',
+                    history: [],
+                    bundleId: '550e8400-e29b-41d4-a716-446655440000',
+                }),
+            })
+
+            await POST(request)
+
+            expect(mockFetch).toHaveBeenCalledWith(
+                expect.stringContaining('/chat'),
+                expect.objectContaining({
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: 'Bearer backend-secret',
+                    },
+                    body: expect.stringContaining('550e8400-e29b-41d4-a716-446655440000'),
+                })
+            )
         })
 
         it('应该返回 SSE 流', async () => {
@@ -129,7 +208,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(502)
             const body = await response.json()
-            expect(body.error).toBe('No response body')
+            expect(body.error.code).toBe('EMPTY_BACKEND_RESPONSE')
         })
 
         it('应该处理网络错误', async () => {
@@ -146,9 +225,9 @@ describe('API Route: /api/chat', () => {
 
             const response = await POST(request)
 
-            expect(response.status).toBe(504)
+            expect(response.status).toBe(502)
             const body = await response.json()
-            expect(body.error).toBe('Network error')
+            expect(body.error.code).toBe('BACKEND_UNREACHABLE')
         })
 
         it('应该处理超时', async () => {
@@ -171,7 +250,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(504)
             const body = await response.json()
-            expect(body.error).toBe('The operation was aborted')
+            expect(body.error.code).toBe('BACKEND_TIMEOUT')
         })
     })
 
@@ -326,7 +405,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(400)
             const body = await response.json()
-            expect(body.error).toBe('Invalid JSON')
+            expect(body.error.code).toBe('INVALID_JSON')
             expect(mockFetch).not.toHaveBeenCalled()
         })
 
@@ -341,7 +420,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(400)
             const body = await response.json()
-            expect(body.error).toBe('Invalid request body')
+            expect(body.error.code).toBe('INVALID_BODY')
             expect(mockFetch).not.toHaveBeenCalled()
         })
 
@@ -359,7 +438,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(400)
             const body = await response.json()
-            expect(body.error).toContain('scenarioId')
+            expect(body.error.code).toBe('INVALID_SCENARIO_ID')
             expect(mockFetch).not.toHaveBeenCalled()
         })
 
@@ -376,7 +455,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(400)
             const body = await response.json()
-            expect(body.error).toContain('history')
+            expect(body.error.code).toBe('INVALID_HISTORY')
             expect(mockFetch).not.toHaveBeenCalled()
         })
 
@@ -393,7 +472,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(400)
             const body = await response.json()
-            expect(body.error).toContain('bundleId')
+            expect(body.error.code).toBe('INVALID_BUNDLE_ID')
             expect(mockFetch).not.toHaveBeenCalled()
         })
 
@@ -410,7 +489,7 @@ describe('API Route: /api/chat', () => {
 
             expect(response.status).toBe(400)
             const body = await response.json()
-            expect(body.error).toContain('bundleId')
+            expect(body.error.code).toBe('INVALID_BUNDLE_ID')
             expect(mockFetch).not.toHaveBeenCalled()
         })
 

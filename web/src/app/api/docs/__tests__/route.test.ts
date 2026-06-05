@@ -15,6 +15,22 @@ describe("GET /api/docs", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("auth misconfig 时返回 503 且不 fetch backend", async () => {
+    vi.stubEnv("WEB_AUTH_ENABLED", "true");
+    vi.stubEnv("AUTH_SESSION_SECRET", "");
+    vi.stubEnv("AUTH_LOGIN_PASSWORD", "");
+    vi.stubEnv("BACKEND_API_KEY", "");
+
+    const req = new Request("http://localhost/api/docs") as import("next/server").NextRequest;
+    const res = await GET(req);
+
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error.code).toBe("AUTH_NOT_CONFIGURED");
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("透传后端列表响应", async () => {
@@ -33,8 +49,7 @@ describe("GET /api/docs", () => {
     const res = await GET();
     expect(res.status).toBe(502);
     const body = await res.json();
-    expect(body.error).toBe("backend_unreachable");
-    expect(Array.isArray(body.items)).toBe(true);
+    expect(body.error.code).toBe("BACKEND_UNREACHABLE");
   });
 });
 
@@ -48,6 +63,7 @@ describe("POST /api/docs", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("无 file 字段返回 400", async () => {
@@ -106,6 +122,24 @@ describe("DELETE /api/docs/[docId]", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("auth misconfig 时返回 503 且不 fetch backend", async () => {
+    vi.stubEnv("WEB_AUTH_ENABLED", "true");
+    vi.stubEnv("AUTH_SESSION_SECRET", "");
+    vi.stubEnv("AUTH_LOGIN_PASSWORD", "");
+    vi.stubEnv("BACKEND_API_KEY", "");
+
+    const req = {} as unknown as import("next/server").NextRequest;
+    const res = await DELETE(req, {
+      params: Promise.resolve({ docId: "abcdef0123456789" }),
+    });
+
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error.code).toBe("AUTH_NOT_CONFIGURED");
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("非法 docId 返回 400", async () => {

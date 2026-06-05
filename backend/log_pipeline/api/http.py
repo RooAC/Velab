@@ -8,13 +8,14 @@ from pathlib import Path
 from typing import Any, Iterator, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, FastAPI, File, Query, Request, UploadFile
+from fastapi import APIRouter, FastAPI, File, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
+from common.errors import api_error, register_error_handlers
 from log_pipeline.config import Settings
 from log_pipeline.ingest.classifier import Classifier
 from log_pipeline.ingest.pipeline import IngestPipeline
-from log_pipeline.interfaces import ControllerType
+from log_pipeline.interfaces import BundleStatus, ControllerType
 from log_pipeline.query.range_query import (
     RangeQuery,
     RangeQueryParams,
@@ -63,10 +64,7 @@ def init_app_state(app: FastAPI, settings: Settings | None = None) -> None:
 
 
 def _error(code: str, message: str, http_status: int) -> JSONResponse:
-    return JSONResponse(
-        status_code=http_status,
-        content={"error": {"code": code, "message": message}},
-    )
+    return api_error(code, message, http_status)
 
 
 def _parse_time(value: str) -> float:
@@ -84,10 +82,20 @@ def _parse_time(value: str) -> float:
 router = APIRouter()
 
 
+async def _submit_bundle_to_arq(bundle_id: UUID, upload_path: Path, upload_name: str) -> str:
+    from tasks.client import get_task_client
+
+    task_client = await get_task_client()
+    return await task_client.submit_bundle_task(
+        str(bundle_id),
+        str(upload_path),
+        upload_name,
+    )
+
+
 @router.post("/bundles", status_code=200, response_model=None)
 async def upload_bundle(
     request: Request,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
 ) -> JSONResponse | dict[str, Any]:
     if not file.filename:
@@ -129,18 +137,23 @@ async def upload_bundle(
 
     pipeline: IngestPipeline = request.app.state.pipeline
     bundle_id = pipeline.register_upload(upload_path, file.filename)
-
-    def _run() -> None:
+    try:
+        task_id = await _submit_bundle_to_arq(bundle_id, upload_path, file.filename)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("failed to enqueue bundle ingest: bundle=%s", bundle_id)
+        pipeline._catalog.update_bundle_status(
+            bundle_id,
+            BundleStatus.FAILED,
+            progress=1.0,
+            error=f"{type(exc).__name__}: task queue unavailable",
+        )
         try:
-            pipeline.run(bundle_id, upload_path)
-        finally:
-            try:
-                upload_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+            upload_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return _error("TASK_QUEUE_UNAVAILABLE", "failed to enqueue bundle ingest task", 503)
 
-    background_tasks.add_task(_run)
-    return {"bundle_id": str(bundle_id), "status": "queued"}
+    return {"bundle_id": str(bundle_id), "task_id": task_id, "status": "queued"}
 
 
 @router.get("/bundles/{bundle_id}", response_model=None)
@@ -280,6 +293,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         yield
 
     app = FastAPI(title="log_pipeline", version="0.1", lifespan=lifespan)
+    register_error_handlers(app)
     app.include_router(router, prefix="/api")
     app.include_router(metrics_router)
 

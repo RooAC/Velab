@@ -43,6 +43,7 @@ from common.chain_log import (
 )
 from common.auth import require_api_key
 from config import settings
+from common.errors import register_error_handlers
 
 from contextlib import asynccontextmanager
 
@@ -126,6 +127,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+register_error_handlers(app)
 
 # 配置 CORS 中间件，允许前端跨域访问
 app.add_middleware(

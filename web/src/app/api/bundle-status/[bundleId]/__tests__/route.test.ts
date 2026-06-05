@@ -19,6 +19,22 @@ describe('GET /api/bundle-status/[bundleId]', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  it('auth misconfig 时返回 503 且不 fetch backend', async () => {
+    vi.stubEnv('WEB_AUTH_ENABLED', 'true')
+    vi.stubEnv('AUTH_SESSION_SECRET', '')
+    vi.stubEnv('AUTH_LOGIN_PASSWORD', '')
+    vi.stubEnv('BACKEND_API_KEY', '')
+
+    const req = new NextRequest(`http://localhost/api/bundle-status/${BUNDLE_ID}`)
+    const res = await GET(req, makeParams(BUNDLE_ID))
+
+    expect(res.status).toBe(503)
+    const body = await res.json()
+    expect(body.error.code).toBe('AUTH_NOT_CONFIGURED')
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('转发请求到后端并返回 bundle 状态', async () => {

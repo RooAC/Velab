@@ -1,4 +1,5 @@
 import { backendAuthHeaders, requireWebSession } from "@/lib/serverAuth";
+import { backendUnreachable } from "@/lib/apiError";
 import { NextRequest } from "next/server";
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
@@ -18,6 +19,6 @@ export async function GET(request: NextRequest) {
       headers: { "Content-Type": "application/json; charset=utf-8" },
     });
   } catch {
-    return Response.json({ error: "backend_unreachable" }, { status: 502 });
+    return backendUnreachable();
   }
 }

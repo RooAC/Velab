@@ -47,7 +47,7 @@ class TaskClient:
 
     async def submit_bundle_task(
         self,
-        case_id: str,
+        bundle_id: str,
         upload_path: str,
         upload_name: str,
     ) -> str:
@@ -57,7 +57,7 @@ class TaskClient:
 
         job = await self._pool.enqueue_job(
             "parse_bundle_task",
-            case_id,
+            bundle_id,
             upload_path,
             upload_name,
         )
@@ -72,7 +72,7 @@ class TaskClient:
             }, ensure_ascii=False),
             ex=3600,
         )
-        logger.info(f"已提交压缩包解析任务: {task_id}, Case: {case_id}, File: {upload_name}")
+        logger.info("已提交压缩包解析任务: %s, Bundle: %s, File: %s", task_id, bundle_id, upload_name)
         return task_id
 
     async def get_task_status(self, task_id: str) -> dict:

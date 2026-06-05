@@ -29,7 +29,12 @@ describe("serverAuth", () => {
     const req = new NextRequest("http://localhost/api/chat");
     const res = requireWebSession(req);
     expect(res?.status).toBe(503);
-    expect(await res?.json()).toEqual({ error: "auth_not_configured" });
+    expect(await res?.json()).toEqual({
+      error: {
+        code: "AUTH_NOT_CONFIGURED",
+        message: "web authentication is not configured",
+      },
+    });
   });
 
   it("rejects missing or invalid cookies when auth is enabled", async () => {
@@ -40,7 +45,12 @@ describe("serverAuth", () => {
     expect(hasValidSession(missing)).toBe(false);
     const res = requireWebSession(missing);
     expect(res?.status).toBe(401);
-    expect(await res?.json()).toEqual({ error: "unauthorized" });
+    expect(await res?.json()).toEqual({
+      error: {
+        code: "UNAUTHORIZED",
+        message: "invalid or missing web session",
+      },
+    });
 
     const invalid = new NextRequest("http://localhost/api/chat", {
       headers: { cookie: `${AUTH_COOKIE_NAME}=wrong` },
