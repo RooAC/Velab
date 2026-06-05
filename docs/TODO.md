@@ -1,8 +1,8 @@
 # Velab 项目任务清单
 
-> **最后更新**: 2026-05-26（功-4 PDF/Excel 上传 + 技术债批量清理）
-> **当前阶段**: Sprint 6 进行中
-> **下一阶段**: Sprint 7 - F1 认证 / 真实 Jira 数据同步 / 权限体系 / 生产部署
+> **最后更新**: 2026-06-04（项目体检 + Sprint 7 收口启动）
+> **当前阶段**: Sprint 7 进行中
+> **下一阶段**: 生产试运行 - 鉴权开启 / 真实 Jira 凭据验证 / 数据清理策略落地
 
 ---
 
@@ -229,7 +229,9 @@
 
 - [x] **Jira 工单数据（Mock）** ✅
   - [x] 创建Mock历史 Jira 工单（10个，2026-04-06 从 4→10 扩充）
-  - [ ] 同步真实历史 Jira 工单
+  - [x] 同步真实历史 Jira 工单基础能力（`services/jira_sync.py` + `/api/jira/sync*`，2026-06-04）
+  - [ ] 生产 Jira 凭据联调与首次同步验收
+  - [ ] Jira 同步权限保护与操作审计
   - [ ] 向量化入库（需 embedding API Key）
 
 - [x] **技术文档数据** ✅ (2026-04-06)
@@ -495,7 +497,18 @@
   - [ ] Bundle 状态轮询 → SSE/WS
   - [ ] 统一异常处理中间件（FastAPI 全局 `exception_handlers`）
   - [ ] `data/` 目录清理策略
-  - [ ] CI 集成 pdfplumber/openpyxl 实跑验证
+  - [x] CI 集成 pdfplumber/openpyxl 实跑验证（`requirements.txt` 已安装，后端全量 476 passed）
+
+### 14. 2026-06-04 项目体检遗留问题收口
+
+> 体检结果：后端 **480 passed**；前端 **245 passed**；前端 lint/build 通过；后端 flake8 严格检查 0；前端生产依赖 `npm audit --omit=dev` 0 漏洞。
+
+- [x] **状态纠偏**：真实 Jira 同步基础代码已存在，TODO 从“未实现”调整为“待生产凭据联调 / 权限保护 / 审计”。
+- [x] **F1 轻量鉴权**：后端支持 `AUTH_ENABLED` + `AUTH_API_KEY`；Next 侧使用 httpOnly cookie 保护代理路由，并用 `BACKEND_API_KEY` 转发到后端。
+- [x] **前端代理边界一致性**：`bundleId` / `sessionId` 代理路由补 UUID 校验和后端不可达 fallback。
+- [x] **数据复现策略**：新增 `backend/scripts/seed_demo_data.py` 生成被 `.gitignore` 排除的安全演示数据。
+- [x] **数据清理策略**：新增 `backend/scripts/cleanup_data.py`，默认 dry-run，支持按年龄清理 workspace/upload/work/bundles，可选 docs/indexes。
+- [ ] **embedding 增量索引**：上传文档后当前仍复用全量重建，应改为 doc_id 级别增量 API。
 
 ---
 
@@ -555,9 +568,13 @@
 - ✅ **第一次试用反馈批量修复**（A1/A2 元问题短路 + A3 上传卡溢出 + R1 日志窗口自动扩展 + F2 场景切换器特性开关）(2026-05-25，详见 §11)
 - ✅ **功-4 PDF/Excel 技术文档上传索引**（后端 3 端点 + 前端 DocManagerButton + 依赖新增 + 29 新增测试）(2026-05-26，详见 §12)
 - ✅ **功-4 落地后技术债批量清理**（LLM hang / client PG 依赖 / event loop 阻塞 / manifest 多进程锁 / magic bytes / embedding_status / requirements 分层）(2026-05-26，详见 §13)
-- ⬜ F1 认证体系
-- ⬜ 真实 Jira 数据同步
-- ⬜ 权限体系与操作审计
+
+### Sprint 7（进行中）🚧
+- ✅ 真实 Jira 数据同步基础能力（手动触发 + 同步状态 API + 本地缓存覆写）
+- ✅ F1 轻量鉴权与后端 API Key 保护
+- ✅ 前端代理路由参数校验 / fallback 统一
+- ⬜ 权限体系与操作审计增强（完整用户/角色/多租户）
+- ✅ 数据清理策略与演示数据复现
 - ⬜ 生产部署
 
 ---
@@ -571,7 +588,7 @@
 | 离线预处理管线 | 100% | ✅ 完成 |
 | 数据库与API | 100% | ✅ 完成 |
 | 任务队列集成 | 100% | ✅ 完成 |
-| API测试 | 100% | ✅ 完成（后端 377 / 前端 209）|
+| API测试 | 100% | ✅ 完成（后端 480 / 前端 245）|
 | MVP核心功能 | 100% | ✅ 完成 |
 | 后端核心逻辑（在线诊断增强） | 100% | ✅ 完成 |
 | 前端交互功能 | 100% | ✅ 完成 |
@@ -586,9 +603,9 @@
 | 功-4 PDF/Excel 技术文档上传 | 100% | ✅ 完成（Sprint 6 新增 2026-05-26）|
 | 技术债批量清理（LLM hang / PG fixture / manifest 锁 / magic bytes / embedding_status / requirements 分层）| 100% | ✅ 完成（Sprint 6 新增 2026-05-26）|
 
-**总体进度**: 约 **99%**（剩余：F1 认证、真实 Jira 数据同步、权限体系与操作审计、人工评审）
+**总体进度**: 约 **99%**（剩余：生产 Jira 凭据联调、完整用户/角色/多租户、操作审计、人工评审、embedding 增量索引）
 
-> 测试覆盖率（2026-05-26）：后端 **444 passed**（+67：feedback PG 隔离 14 + docs_api 6 新增 + DocManager UI 全链路）；前端 **226 passed | 11 skipped**（+17：DocManagerButton 9 + docs route 8），statements / branches / functions / lines 均高于红线。
+> 测试覆盖率（2026-06-04）：后端 **480 passed**；前端 **245 passed**；当前未发现显式 `it.skip` / `pytest.skip`，仅保留 `openpyxl` 缺失时的条件导入跳过保护。
 
 ---
 

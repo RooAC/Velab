@@ -24,9 +24,14 @@ from __future__ import annotations
 import json
 import logging
 import time
+from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
-from fastapi import FastAPI, Request
+import httpx
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from sse_starlette.sse import EventSourceResponse
 
 from common.chain_log import (
@@ -36,6 +41,7 @@ from common.chain_log import (
     reset_trace_id,
     setup_logging,
 )
+from common.auth import require_api_key
 from config import settings
 
 from contextlib import asynccontextmanager
@@ -125,8 +131,8 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS.split(","),  # 从环境变量读取，避免通配符
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
 
 # 注册API路由
@@ -158,7 +164,7 @@ async def root():
     }
 
 
-@app.post("/chat")
+@app.post("/chat", dependencies=[Depends(require_api_key)])
 async def chat(request: Request):
     """
     诊断对话接口（SSE 流式响应）
@@ -249,6 +255,134 @@ async def chat(request: Request):
             reset_trace_id(trace_token)
 
     return EventSourceResponse(event_generator())
+
+
+def _ready_ok(check: dict[str, Any]) -> bool:
+    return check.get("status") in {"ok", "skipped"}
+
+
+def _check_database() -> dict[str, Any]:
+    try:
+        with db_manager.get_session() as session:
+            session.execute(text("SELECT 1"))
+        pool_status = db_manager.get_pool_status()
+        return {
+            "status": "ok",
+            "pool_size": pool_status.get("size"),
+            "checked_out": pool_status.get("checked_out"),
+        }
+    except Exception as exc:  # noqa: BLE001 - readiness must contain dependency failures
+        return {"status": "failed", "error": type(exc).__name__}
+
+
+async def _check_redis_queue() -> dict[str, Any]:
+    try:
+        from tasks.client import get_task_client
+
+        task_client = await get_task_client()
+        if task_client is None:
+            return {"status": "failed", "error": "TaskClientUnavailable"}
+        queue_info = await task_client.get_queue_info()
+        if "error" in queue_info:
+            return {"status": "failed", "error": "RedisQueueError"}
+        return {
+            "status": "ok",
+            "queue_length": queue_info.get("queue_length"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "failed", "error": type(exc).__name__}
+
+
+def _check_log_pipeline(request: Request) -> dict[str, Any]:
+    required_state = (
+        "log_pipeline_settings",
+        "pipeline",
+        "eventdb",
+        "slim_filter",
+        "range_query",
+    )
+    missing = [name for name in required_state if not hasattr(request.app.state, name)]
+    if missing:
+        return {"status": "failed", "missing": missing}
+
+    return {
+        "status": "ok",
+        "components": len(required_state),
+    }
+
+
+def _check_agents() -> dict[str, Any]:
+    try:
+        from agents.base import registry
+
+        agents = registry.all_agents()
+        if not agents:
+            return {"status": "failed", "count": 0}
+        return {
+            "status": "ok",
+            "count": len(agents),
+            "names": [agent.name for agent in agents],
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "failed", "error": type(exc).__name__}
+
+
+def _litellm_probe_url() -> str | None:
+    if not settings.LITELLM_BASE_URL:
+        return None
+
+    parts = urlsplit(settings.LITELLM_BASE_URL)
+    path_parts = [part for part in parts.path.split("/") if part]
+    models_path = "/" + "/".join([*path_parts, "models"])
+    return urlunsplit((parts.scheme, parts.netloc, models_path, "", ""))
+
+
+async def _check_litellm_gateway() -> dict[str, Any]:
+    if getattr(settings.DEPLOYMENT_MODE, "value", settings.DEPLOYMENT_MODE) != "A":
+        return {"status": "skipped", "reason": "deployment_mode_b"}
+
+    probe_url = _litellm_probe_url()
+    if not probe_url:
+        return {"status": "failed", "error": "MissingLiteLLMBaseUrl"}
+    if not settings.LITELLM_API_KEY:
+        return {"status": "failed", "error": "MissingLiteLLMApiKey"}
+
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            response = await client.get(
+                probe_url,
+                headers={"Authorization": f"Bearer {settings.LITELLM_API_KEY}"},
+            )
+        if 200 <= response.status_code < 300:
+            return {"status": "ok", "status_code": response.status_code}
+        return {
+            "status": "failed",
+            "status_code": response.status_code,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "failed", "error": type(exc).__name__}
+
+
+@app.get("/ready")
+async def ready(request: Request):
+    """
+    深度就绪检查。
+
+    覆盖部署所需的关键本地依赖；任一关键依赖失败时返回 503。
+    不调用外部模型供应商，也不在响应中暴露任何密钥。
+    """
+    checks = {
+        "database": _check_database(),
+        "redis_queue": await _check_redis_queue(),
+        "log_pipeline": _check_log_pipeline(request),
+        "agents": _check_agents(),
+        "llm_gateway": await _check_litellm_gateway(),
+    }
+    is_ready = all(_ready_ok(check) for check in checks.values())
+    payload = {"status": "ready" if is_ready else "not_ready", "checks": checks}
+    if is_ready:
+        return payload
+    return JSONResponse(status_code=503, content=payload)
 
 
 @app.get("/health")

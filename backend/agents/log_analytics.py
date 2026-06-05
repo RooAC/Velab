@@ -290,6 +290,7 @@ class LogAnalyticsAgent(BaseAgent):
 
                     # 解析 NDJSON + 关键词过滤
                     lines = []
+                    parsed_count = 0
                     for raw_line in raw_text.splitlines():
                         raw_line = raw_line.strip()
                         if not raw_line:
@@ -298,6 +299,7 @@ class LogAnalyticsAgent(BaseAgent):
                             record: dict = json.loads(raw_line)
                         except json.JSONDecodeError:
                             continue
+                        parsed_count += 1
                         ts = record.get("ts") or record.get("timestamp", "")
                         ctrl = record.get("controller", "")
                         msg = record.get("msg") or record.get("message", "")
@@ -315,6 +317,7 @@ class LogAnalyticsAgent(BaseAgent):
                         and keywords
                         and len(lines) < expand_threshold
                         and current_limit < max_limit
+                        and parsed_count >= current_limit
                     ):
                         next_limit = min(current_limit * 2, max_limit)
                         log.info(

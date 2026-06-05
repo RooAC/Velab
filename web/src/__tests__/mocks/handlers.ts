@@ -36,6 +36,11 @@ function createSSEResponse(events: Record<string, unknown>[]) {
  * API 处理器
  */
 export const handlers = [
+    // 鉴权状态（测试默认放行 AuthGate）
+    http.get('/api/auth/status', () => {
+        return HttpResponse.json({ enabled: false, authenticated: true })
+    }),
+
     // 聊天 API
     http.post(`${BACKEND_URL}/chat`, async ({ request }) => {
         await request.json()

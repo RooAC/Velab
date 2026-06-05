@@ -242,3 +242,12 @@
 - **回归**：后端核心受影响 **112 passed**（+10 doc_retrieval 全量恢复），前端全量 **222 passed | 11 skipped**（+5 DocManagerButton）
 - **未实施（独立工作流）**：① `client` fixture PG 依赖整体改造；② 功-1 用户认证；③ embedding 默认开关业务决策；④ 全量 vs 增量 reindex 优化；⑤ requirements 分层 base/dev/optional；⑥ CI 集成 pdfplumber/openpyxl 实跑验证
 
+### 2026-06-04: Sprint 7 轻量鉴权 + 数据复现/清理策略
+- **文档先行**：`docs/TODO.md` 更新到 Sprint 7，纠正“真实 Jira 数据同步”状态（基础能力已由 `services/jira_sync.py` + `/api/jira/sync*` 实现，剩余为生产凭据联调/权限/审计）；新增 `docs/decisions/ADR-001-lightweight-api-key-auth.md` 记录本轮 API Key + httpOnly cookie 的临时生产保护边界。
+- **后端轻量鉴权**：新增 `backend/common/auth.py`；`AUTH_ENABLED=false` 默认保持本地/CI 零配置，`AUTH_ENABLED=true` 时 `/chat` 与 `/api/*` 要求 `Authorization: Bearer <AUTH_API_KEY>` 或 `X-API-Key`。`backend/.env.example` 补充 `AUTH_ENABLED` / `AUTH_API_KEY`。
+- **前端登录门**：新增 `/api/auth/login`、`/api/auth/logout`、`/api/auth/status` 和 `components/AuthGate.tsx`。生产需同时设置 `WEB_AUTH_ENABLED=true` 与 `NEXT_PUBLIC_WEB_AUTH_ENABLED=true`；浏览器只保存 httpOnly cookie，后端 API Key 仅由 Next.js 服务端代理用 `BACKEND_API_KEY` 转发。
+- **代理边界统一**：`bundle-status` / `bundle-logs` / `bundle-events` / `sessions/[sessionId]` 补 UUID 校验；非法 ID 在 Next 代理层直接 400；代理 fetch 加后端不可达 502 fallback；`upload-log` 补缺失 file 400。
+- **数据策略**：由于 `.gitignore` 忽略 `backend/data/**`，新增 `backend/scripts/seed_demo_data.py` 生成安全合成演示数据；新增 `backend/scripts/cleanup_data.py` 按年龄清理 workspace/uploads/work/bundles，默认 dry-run，支持 `--execute`、`--include-docs`、`--include-indexes`。
+- **文档同步**：`backend/README.md` 补后端鉴权与 seed/cleanup 使用；`web/README.md` 和 `web/.env.example` 补前端登录门、`BACKEND_API_KEY` 与生产 env 说明。
+- **验证**：后端全量 **480 passed**；前端全量 **245 passed**；前端 lint/build 通过；后端 flake8 严格检查 0；`npm audit --omit=dev` 0 vulnerabilities。
+- **仍未完成**：完整用户/角色/多租户、操作审计、生产 Jira 凭据联调、embedding 文档增量索引。

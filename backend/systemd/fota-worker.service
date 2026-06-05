@@ -1,0 +1,41 @@
+# ============================================================
+# FOTA 智能诊断平台 - Arq Worker systemd 服务配置
+# ============================================================
+# 安装步骤：
+# 1. sudo cp systemd/fota-worker.service /etc/systemd/system/
+# 2. sudo systemctl daemon-reload
+# 3. sudo systemctl enable fota-worker
+# 4. sudo systemctl start fota-worker
+
+[Unit]
+Description=FOTA Intelligent Diagnostic Platform - Arq Worker
+Documentation=https://github.com/your-org/velab
+After=network.target postgresql.service redis.service fota-backend.service
+
+[Service]
+Type=simple
+User=fota
+Group=fota
+WorkingDirectory=/opt/fota-backend
+EnvironmentFile=/opt/fota-backend/.env
+Environment=PATH=/opt/fota-backend/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ExecStart=/opt/fota-backend/venv/bin/python run_worker.py
+
+StandardOutput=journal
+StandardError=journal
+
+Restart=always
+RestartSec=10
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/fota-backend/logs
+ReadWritePaths=/opt/fota-backend/data
+PrivateTmp=yes
+
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -142,11 +142,14 @@ def get_feedback(
     return feedback
 
 
+_VALID_STATUSES = {"CONFIRMED", "REJECTED", "PARTIAL"}
+
+
 @router.get("", response_model=List[DiagnosisFeedbackResponse])
 def list_feedback(
-    status: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0,
+    status: Optional[str] = Query(None, description="确认状态: CONFIRMED / REJECTED / PARTIAL"),
+    limit: int = Query(50, ge=1, le=500, description="返回数量上限"),
+    offset: int = Query(0, ge=0, description="偏移量"),
     db: Session = Depends(get_db),
 ):
     """
@@ -154,6 +157,11 @@ def list_feedback(
 
     可按确认状态过滤
     """
+    if status is not None and status not in _VALID_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status, must be one of: {', '.join(sorted(_VALID_STATUSES))}",
+        )
     query = db.query(ConfirmedDiagnosis)
     if status:
         query = query.filter_by(confirmation_status=status)

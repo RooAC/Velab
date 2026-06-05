@@ -48,7 +48,9 @@ echo -e "${GREEN}✓ 部署目录 $DEPLOY_DIR 已就绪${NC}"
 
 echo -e "${BLUE}[4/7] 迁移与同步代码文件...${NC}"
 # 同步前排除本地的 node_modules 和构建缓存，排除 .env.local 避免覆盖生产配置
-rsync -av --exclude='node_modules' --exclude='.next' --exclude='.env.local' $WEB_DIR/ $DEPLOY_DIR/
+rsync -av --exclude='node_modules' --exclude='.next' --exclude='.env.local' \
+    --exclude='coverage' --exclude='.vitest' \
+    $WEB_DIR/ $DEPLOY_DIR/
 chown -R fota-web:fota-web $DEPLOY_DIR
 echo -e "${GREEN}✓ 代码迁移完成并设置权限${NC}"
 
@@ -65,6 +67,7 @@ else
     echo -e "${YELLOW}⚠ .env.local 已存在，跳过覆盖${NC}"
 fi
 chown fota-web:fota-web $DEPLOY_DIR/.env.local
+chmod 600 $DEPLOY_DIR/.env.local
 
 echo -e "${BLUE}[6/7] 执行 NPM 安装与编译 (Next.js Build)...${NC}"
 # 注意必须切到执行目录，并在用户赋权下进行构建
@@ -83,8 +86,9 @@ if [ -f "$WEB_DIR/systemd/fota-web.service" ]; then
     if systemctl is-active --quiet fota-web; then
         echo -e "${GREEN}✓ front-end systemd 服务已挂载并正常运行${NC}"
     else
-        echo -e "${YELLOW}⚠ systemd 服务已安装，但当前未在运行状态${NC}"
+        echo -e "${RED}❌ systemd 服务已安装，但当前未在运行状态${NC}"
         echo -e "${YELLOW}  排查命令: journalctl -u fota-web -n 30${NC}"
+        exit 1
     fi
 else
     echo -e "${RED}无法找到 web/systemd/fota-web.service 服务描述文件${NC}"

@@ -622,11 +622,20 @@ async def orchestrate(
             if bundle_id:
                 agent_context["bundle_id"] = bundle_id
             raw_time_hint = args.get("time_hint")
-            if isinstance(raw_time_hint, str) and raw_time_hint.strip():
+            if isinstance(raw_time_hint, str) and 0 < len(raw_time_hint.strip()) <= 100:
                 agent_context["time_hint"] = raw_time_hint.strip()
+            # 校验 keywords：限制数组大小和单词长度，防止超大输入
+            raw_keywords = args.get("keywords")
+            if isinstance(raw_keywords, list):
+                keywords: list[str] | None = [
+                    str(k)[:80] for k in raw_keywords[:20]
+                    if isinstance(k, str) and k.strip()
+                ]
+            else:
+                keywords = None
             return await agent.execute(
                 task=args.get("task", ""),
-                keywords=args.get("keywords"),
+                keywords=keywords,
                 context=agent_context if agent_context else None,
             )
 

@@ -2,7 +2,7 @@
 
 ## 概述
 
-本系统使用 **Arq**（基于 Redis）实现异步任务队列。当前唯一的业务任务是 `parse_bundle_task` —— 它是 [`log_pipeline.IngestPipeline`](../log_pipeline/CLAUDE.md) 的薄包装，负责接管整车日志压缩包的全链路摄取（解压 → 分类 → 解码 → 单遍预扫描 → 时间对齐 → 持久化）。
+本系统使用 **Arq**（基于 Redis）实现异步任务队列。当前核心业务任务是 `parse_bundle_task` —— 它是 [`log_pipeline.IngestPipeline`](../log_pipeline/CLAUDE.md) 的薄包装，负责接管整车日志压缩包的全链路摄取（解压 → 分类 → 解码 → 单遍预扫描 → 时间对齐 → 持久化）。
 
 进度（status / progress 0–1）由 Worker 后台任务**每 1 秒**从 SQLite catalog 中读取并写入 Redis 键 `task_progress:{task_id}`，前端按 `bundle_id` 直接轮询 `/api/bundles/{id}` 即可拿到 `progress`、`status`、`files_by_controller` 等结构化字段（不再依赖 `task_id`）。
 
@@ -24,7 +24,7 @@
                                      └──────────────┘
 ```
 
-> 注：FastAPI app 在 `BackgroundTasks` 中也会直接跑同一份 `IngestPipeline.run` —— 这是 log_pipeline 自己的 `/api/bundles` 路由提供的同步路径（用于无 Arq 部署）。生产环境推荐用 Arq Worker，避免阻塞 HTTP 进程。
+> 注：当前 `backend/api/__init__.py` 挂载的是 log_pipeline 自己的 `/api/bundles` 路由。该路由上传后会在 FastAPI `BackgroundTasks` 中运行同一份 `IngestPipeline.run`。Arq worker 仍作为生产服务存在，用于需要显式入队的异步摄取路径、任务进度缓存和后续队列化扩展。
 
 ## 组件
 
@@ -59,40 +59,23 @@ cd backend && python run_worker.py
 cd backend && arq tasks.worker.WorkerSettings
 
 # 方式 3：systemd（生产）
-sudo nano /etc/systemd/system/fota-worker.service
-```
-
-```ini
-[Unit]
-Description=FOTA Arq Worker
-After=network.target redis.service postgresql.service
-
-[Service]
-Type=simple
-User=fota
-WorkingDirectory=/opt/fota-backend
-Environment="PATH=/opt/fota-backend/venv/bin"
-Environment="LOG_PIPELINE_DATA_ROOT=/var/lib/fota/data"
-ExecStart=/opt/fota-backend/venv/bin/python run_worker.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
+sudo cp systemd/fota-worker.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now fota-worker
 ```
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now fota-worker
 sudo systemctl status fota-worker
 sudo journalctl -u fota-worker -f
 ```
+
+生产 unit 文件位于 [`../systemd/fota-worker.service`](../systemd/fota-worker.service)，工作目录为 `/opt/fota-backend`，环境变量从 `/opt/fota-backend/.env` 读取，启动命令为 `/opt/fota-backend/venv/bin/python run_worker.py`。
 
 ### API 调用示例
 
 #### 1. 上传 bundle（提交 Arq 任务）
 
-通过 `/api/bundles` 上传时，FastAPI 会**直接同步起一个 BackgroundTask** 调用 `IngestPipeline`，不走 Arq。要走 Arq 队列，前端调用 `/api/upload-log`，由 Web 中转层走 `task_client.submit_bundle_task` 入队。
+通过 `/api/bundles` 上传时，FastAPI 会起一个 `BackgroundTask` 调用 `IngestPipeline`，不直接走 Arq。需要显式 Arq 入队时，由调用方使用 `tasks.client.TaskClient.submit_bundle_task(...)`，或通过上层服务封装后再入队。
 
 ```bash
 curl -F "file=@/path/to/bundle.zip" http://localhost:8000/api/bundles

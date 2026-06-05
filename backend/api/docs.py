@@ -313,14 +313,15 @@ async def upload_document(
         if target_dir.exists():
             # 内容已存在（去重），返回已有 meta
             shutil.rmtree(tmp_dir, ignore_errors=True)
-            items = _read_manifest()
-            for item in items:
-                if item.get("doc_id") == doc_id:
-                    return UploadResponse(
-                        success=True,
-                        doc=DocumentMeta(**item),
-                        reindex_scheduled=False,
-                    )
+            with _manifest_lock():
+                items = _read_manifest()
+                for item in items:
+                    if item.get("doc_id") == doc_id:
+                        return UploadResponse(
+                            success=True,
+                            doc=DocumentMeta(**item),
+                            reindex_scheduled=False,
+                        )
 
         target_dir.mkdir(parents=True, exist_ok=True)
         final_path = target_dir / safe_name

@@ -117,9 +117,10 @@ if [ -f "$GATEWAY_DIR/systemd/litellm.service" ]; then
     if systemctl is-active --quiet litellm; then
         echo -e "${GREEN}✓ systemd 服务已安装并正常运行${NC}"
     else
-        echo -e "${YELLOW}⚠ systemd 服务已安装，但当前未在运行状态${NC}"
+        echo -e "${RED}❌ systemd 服务已安装，但当前未在运行状态${NC}"
         echo -e "${YELLOW}  常见原因: .env 中含占位值（xxxxx）或 API Key 无效${NC}"
         echo -e "${YELLOW}  排查命令: journalctl -u litellm -n 30${NC}"
+        exit 1
     fi
 else
     echo -e "${YELLOW}⚠ systemd 服务文件不存在，跳过安装${NC}"

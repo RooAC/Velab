@@ -22,6 +22,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import Header from "@/components/Header";
+import AuthGate from "@/components/AuthGate";
 import WelcomePage from "@/components/WelcomePage";
 import InputBar from "@/components/InputBar";
 import ChatMessageComponent from "@/components/ChatMessage";
@@ -1210,6 +1211,7 @@ export default function Home() {
   const hasMessages = activeMessages.length > 0;
 
   return (
+    <AuthGate>
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--bg-primary)" }}>
       <Header
         currentScenario={currentScenario}
@@ -1302,5 +1304,6 @@ export default function Home() {
         </div>
       </main>
     </div>
+    </AuthGate>
   );
 }

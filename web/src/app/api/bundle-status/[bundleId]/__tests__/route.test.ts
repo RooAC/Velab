@@ -7,6 +7,7 @@ import { vi, beforeEach, afterEach, describe, it, expect } from 'vitest'
 
 const makeParams = (bundleId: string) =>
   ({ params: Promise.resolve({ bundleId }) }) as { params: Promise<{ bundleId: string }> }
+const BUNDLE_ID = '550e8400-e29b-41d4-a716-446655440000'
 
 describe('GET /api/bundle-status/[bundleId]', () => {
   let mockFetch: ReturnType<typeof vi.fn>
@@ -23,12 +24,12 @@ describe('GET /api/bundle-status/[bundleId]', () => {
   it('转发请求到后端并返回 bundle 状态', async () => {
     mockFetch.mockResolvedValue({
       status: 200,
-      text: async () => '{"id":"b1","status":"done"}',
+      text: async () => '{"id":"550e8400-e29b-41d4-a716-446655440000","status":"done"}',
     })
-    const req = new NextRequest('http://localhost/api/bundle-status/b1')
-    const res = await GET(req, makeParams('b1'))
+    const req = new NextRequest(`http://localhost/api/bundle-status/${BUNDLE_ID}`)
+    const res = await GET(req, makeParams(BUNDLE_ID))
     expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/bundles/b1'),
+      expect.stringContaining(`/api/bundles/${BUNDLE_ID}`),
       expect.objectContaining({ method: 'GET' })
     )
     expect(res.status).toBe(200)
@@ -36,8 +37,15 @@ describe('GET /api/bundle-status/[bundleId]', () => {
 
   it('透传 404 状态码', async () => {
     mockFetch.mockResolvedValue({ status: 404, text: async () => '{"detail":"not found"}' })
-    const req = new NextRequest('http://localhost/api/bundle-status/missing')
-    const res = await GET(req, makeParams('missing'))
+    const req = new NextRequest(`http://localhost/api/bundle-status/${BUNDLE_ID}`)
+    const res = await GET(req, makeParams(BUNDLE_ID))
     expect(res.status).toBe(404)
+  })
+
+  it('非法 bundleId 直接返回 400', async () => {
+    const req = new NextRequest('http://localhost/api/bundle-status/not-a-uuid')
+    const res = await GET(req, makeParams('not-a-uuid'))
+    expect(res.status).toBe(400)
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 })

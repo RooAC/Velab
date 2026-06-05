@@ -1,388 +1,285 @@
-# FOTA 智能诊断平台 - Web 前端
+# Velab Web 前端 / BFF
 
-基于 Next.js 16 构建的 FOTA 诊断平台前端应用，提供实时流式诊断交互界面。
+Velab Web 是基于 Next.js 16 / React 19 的前端与服务端 BFF 子项目。浏览器访问 Web 页面和 `/api/*` 路由，Next.js 服务端再把诊断、上传、会话、文档等请求转发到 backend。
 
----
+生产环境中，`fota-web` systemd 服务监听 `127.0.0.1:3000`，由 Nginx 对外暴露；backend 可经 Nginx 的 `/backend-api/health` 与 `/backend-api/ready` 验证健康和依赖就绪状态。
 
-## 📋 目录结构
+## 目录结构
 
-```
+```text
 web/
 ├── src/
-│   ├── app/                    # Next.js App Router
-│   │   ├── api/
-│   │   │   ├── chat/           # SSE 诊断流代理
-│   │   │   ├── upload-log/     # 日志包上传代理
-│   │   │   ├── bundle-status/  # Bundle 处理状态轮询
-│   │   │   ├── bundle-events/  # Bundle 事件查询
-│   │   │   ├── bundle-logs/    # Bundle 日志内容查询
-│   │   │   ├── sessions/       # 会话 CRUD
-│   │   │   ├── parse-status/   # 解析任务状态
-│   │   │   └── session-title/  # 会话标题生成
+│   ├── app/
+│   │   ├── api/               # Next.js BFF / API 代理路由
 │   │   ├── page.tsx           # 主页面
 │   │   ├── layout.tsx         # 根布局
 │   │   └── globals.css        # 全局样式
 │   ├── components/            # React 组件
-│   │   ├── ChatMessage.tsx    # 消息组件（含 XSS 防护）
-│   │   ├── ThinkingProcess.tsx # Agent 执行状态展示
-│   │   ├── InputBar.tsx       # 输入框
-│   │   ├── Header.tsx         # 页头（场景切换）
-│   │   ├── WelcomePage.tsx    # 欢迎页
-│   │   ├── FeedbackButtons.tsx # 反馈按钮
-│   │   ├── SourcePanel.tsx    # 引用来源面板
-│   │   ├── SessionSidebar.tsx # 历史会话侧边栏
-│   │   └── UploadSummaryCard.tsx # 日志上传摘要卡
-│   └── lib/                   # 工具库
-│       ├── types.ts           # TypeScript 类型定义
-│       ├── sseParse.ts        # SSE 流解析器
-│       └── bundleStatus.ts    # Bundle 状态轮询客户端
+│   └── lib/                   # SSE、鉴权、路由校验等工具
 ├── public/                    # 静态资源
-├── package.json               # 依赖配置
-├── tsconfig.json              # TypeScript 配置
-├── next.config.ts             # Next.js 配置（含安全响应头、outputFileTracingRoot）
-└── postcss.config.mjs          # PostCSS / Tailwind CSS v4 配置
+├── scripts/deploy.sh          # Web 单服务部署脚本
+├── systemd/fota-web.service   # 生产 systemd unit 模板
+├── package.json
+├── next.config.ts
+├── vitest.config.ts
+└── README_TESTING.md
 ```
 
----
+## 运行方式
 
-## 🚀 快速启动（开发环境）
-
-### 1. 安装依赖
+### 本地开发
 
 ```bash
+cd /home/Velab/web
 npm install
-# 或
-yarn install
-# 或
-pnpm install
-```
-
-### 2. 配置环境变量
-
-```bash
 cp .env.example .env.local
-# 编辑 .env.local 文件，配置后端服务地址
-```
-
-`.env.local` 示例：
-```bash
-NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
-BACKEND_URL=http://localhost:8000
-```
-
-### 3. 启动开发服务器
-
-```bash
 npm run dev
-# 或
-yarn dev
-# 或
-pnpm dev
 ```
 
-访问 [http://localhost:3000](http://localhost:3000) 查看应用。
-
-### 4. 构建生产版本
+默认访问地址：
 
 ```bash
+xdg-open http://localhost:3000
+```
+
+本地默认把 BFF 上游指向 `http://localhost:8000`。如果 backend 不在本机默认端口，修改 `web/.env.local` 中的 `BACKEND_URL`。
+
+### 生产拓扑
+
+```text
+Browser
+  │
+  ▼
+Nginx
+  ├─ /, /api/*      -> http://127.0.0.1:3000  (fota-web / Next.js)
+  └─ /backend-api/* -> http://127.0.0.1:8000  (backend)
+        │
+        └─ /backend-api/ready 用于验证 backend 依赖是否就绪
+```
+
+`fota-web` 服务只绑定本机回环地址：
+
+```ini
+ExecStart=/opt/fota-web/node_modules/.bin/next start --hostname 127.0.0.1
+```
+
+因此生产访问应通过 Nginx 域名或服务器入口，不应直接暴露 3000 端口。
+
+## 环境变量
+
+环境变量从 `web/.env.local` 读取；生产落地位置通常是 `/opt/fota-web/.env.local`，并由 `web/systemd/fota-web.service` 的 `EnvironmentFile=/opt/fota-web/.env.local` 加载。
+
+### 本地示例
+
+```bash
+BACKEND_URL=http://localhost:8000
+WEB_AUTH_ENABLED=false
+NEXT_PUBLIC_WEB_AUTH_ENABLED=false
+NEXT_PUBLIC_SHOW_SCENARIO_SWITCHER=true
+```
+
+### 生产示例
+
+```bash
+BACKEND_URL=http://127.0.0.1:8000
+WEB_AUTH_ENABLED=true
+NEXT_PUBLIC_WEB_AUTH_ENABLED=true
+AUTH_LOGIN_PASSWORD=<set-a-strong-password>
+AUTH_SESSION_SECRET=<set-a-random-cookie-secret>
+BACKEND_API_KEY=<same-as-backend-auth-api-key>
+NEXT_PUBLIC_SHOW_SCENARIO_SWITCHER=false
+```
+
+不要把真实密钥写进仓库。`AUTH_LOGIN_PASSWORD`、`AUTH_SESSION_SECRET`、`BACKEND_API_KEY` 只应存在于服务器环境文件或密钥管理系统中。
+
+### 变量说明
+
+| 变量 | 作用 | 是否暴露给浏览器 |
+| --- | --- | --- |
+| `BACKEND_URL` | Next.js BFF 访问 backend 的服务端上游地址 | 否 |
+| `WEB_AUTH_ENABLED` | 服务端鉴权开关 | 否 |
+| `NEXT_PUBLIC_WEB_AUTH_ENABLED` | 浏览器端鉴权 UI 开关，应与 `WEB_AUTH_ENABLED` 保持一致 | 是 |
+| `AUTH_LOGIN_PASSWORD` | Web 登录口令，仅在鉴权开启时需要 | 否 |
+| `AUTH_SESSION_SECRET` | httpOnly cookie 签名 secret；未设置时会退回使用登录口令 | 否 |
+| `BACKEND_API_KEY` | BFF 转发到 backend 时附带的服务端 API Key | 否 |
+| `NEXT_PUBLIC_SHOW_SCENARIO_SWITCHER` | 是否显示场景切换入口 | 是 |
+
+## BFF / API 转发
+
+浏览器侧应调用同源 `/api/*`，不要直接调用 backend 内网地址。当前 Web BFF 包括：
+
+| Web 路由 | 上游 backend 路径 | 用途 |
+| --- | --- | --- |
+| `POST /api/chat` | `POST ${BACKEND_URL}/chat` | SSE 诊断流代理 |
+| `POST /api/upload-log` | `POST ${BACKEND_URL}/api/bundles` | 日志包上传 |
+| `GET /api/bundle-status/[bundleId]` | `GET ${BACKEND_URL}/api/bundles/{bundleId}` | Bundle 状态 |
+| `GET /api/bundle-events/[bundleId]` | `GET ${BACKEND_URL}/api/bundles/{bundleId}/events` | Bundle 事件 |
+| `GET /api/bundle-logs/[bundleId]` | `GET ${BACKEND_URL}/api/bundles/{bundleId}/logs` | Bundle 日志内容 |
+| `GET/POST /api/sessions` | `${BACKEND_URL}/api/sessions` | 会话列表与创建 |
+| `GET/PUT/DELETE /api/sessions/[sessionId]` | `${BACKEND_URL}/api/sessions/{sessionId}` | 会话读写删除 |
+| `POST /api/session-title` | `POST ${BACKEND_URL}/api/sessions/title` | 会话标题生成 |
+| `GET/POST /api/docs` | `${BACKEND_URL}/api/docs` | 文档列表与上传 |
+| `GET/DELETE /api/docs/[docId]` | `${BACKEND_URL}/api/docs/{docId}` | 文档读取与删除 |
+
+当 `BACKEND_API_KEY` 存在时，BFF 会在服务端转发认证信息给 backend；浏览器只持有 Web 登录态 cookie，不直接接触 backend API Key。
+
+## Backend 健康与 ready 联动
+
+Nginx 暴露 `/backend-api/*` 作为 backend 的外部探针入口：
+
+```bash
+curl -fsS http://<web-domain>/backend-api/health
+curl -fsS http://<web-domain>/backend-api/ready
+```
+
+本机排障可绕过 Nginx：
+
+```bash
+curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8000/ready
+```
+
+建议发布或重启后同时检查 Web 服务与 backend ready：
+
+```bash
+curl -fsS http://127.0.0.1:3000/
+curl -fsS http://<web-domain>/backend-api/ready
+```
+
+`/health` 仅表示 backend 进程基本健康；`/ready` 还会检查 backend 依赖，返回非 ready 时 Web 页面可能能打开，但诊断、上传或会话能力可能不可用。
+
+## 构建与部署
+
+### 本地构建
+
+```bash
+cd /home/Velab/web
 npm run build
 npm run start
 ```
 
----
-
-## 🏭 生产环境部署
-
-### Vercel 部署（推荐）
-
-1. 将代码推送到 GitHub
-2. 在 [Vercel](https://vercel.com) 导入项目
-3. 配置环境变量：
-   - `NEXT_PUBLIC_BACKEND_URL`: 后端 API 地址（公开）
-   - `BACKEND_URL`: 后端 API 地址（服务端）
-4. 部署
-
-### Docker 部署
+### 生产单服务部署
 
 ```bash
-# 构建镜像
-docker build -t fota-web .
-
-# 运行容器
-docker run -d -p 3000:3000 \
-  -e NEXT_PUBLIC_BACKEND_URL=https://api.example.com \
-  -e BACKEND_URL=https://api.example.com \
-  fota-web
+cd /home/Velab/web
+sudo ./scripts/deploy.sh
 ```
 
-### 传统服务器部署
+脚本会同步 Web 代码到 `/opt/fota-web`，安装依赖，执行 `npm run build`，安装并重启 `fota-web` systemd 服务。脚本不会覆盖已存在的 `/opt/fota-web/.env.local`。
+
+### 手动部署步骤
 
 ```bash
-# 构建
-npm run build
+sudo mkdir -p /opt/fota-web
+sudo rsync -av --exclude node_modules --exclude .next --exclude .env.local /home/Velab/web/ /opt/fota-web/
+sudo chown -R fota-web:fota-web /opt/fota-web
 
-# 使用 PM2 运行
-pm2 start npm --name "fota-web" -- start
+cd /opt/fota-web
+sudo -u fota-web npm install
+sudo -u fota-web npm run build
 
-# 或使用 systemd
-sudo cp systemd/fota-web.service /etc/systemd/system/
+sudo cp /opt/fota-web/systemd/fota-web.service /etc/systemd/system/fota-web.service
+sudo systemctl daemon-reload
 sudo systemctl enable fota-web
-sudo systemctl start fota-web
+sudo systemctl restart fota-web
 ```
 
----
-
-## 🎨 核心功能
-
-### 1. 实时流式诊断
-
-- 基于 SSE (Server-Sent Events) 的实时数据流
-- 逐步展示 Agent 执行过程（Thinking Process）
-- **工作区排查进度展示**：实时渲染 `todo.md` 和 `notes.md` 的增量更新（Checklist/摘要）
-- 流式输出最终诊断结果
-
-### 2. 多场景支持
-
-- FOTA 诊断
-- Jira 工单检索
-- 车队分析
-- CES 演示
-- 数据采集
-
-### 3. 交互体验
-
-- Markdown 格式渲染（标题、列表、代码块、表格）
-- 流式输出光标动画
-- 可折叠的思考过程
-- 反馈按钮（点赞/点踩）
-- 自动滚动到最新消息
-
-### 4. 日志上传工作流（Sprint 5 新增）
-
-- 拖拽或选择日志压缩包上传（zip/tar.gz）
-- 实时展示解析进度（轮询 bundle 状态）
-- 上传完成后展示摘要（文件数、事件数、控制器分类）
-- 错误状态友好展示
-
-### 5. 会话持久化
-
-- 侧边栏展示历史会话列表
-- 支持新建 / 切换 / 删除会话
-- 刷新页面后自动恢复上次会话
-
-### 6. 响应式设计
-
-- 支持桌面和移动设备
-- 深色主题（基于 CSS 变量）
-- 流畅的动画效果
-
-### 7. 安全加固（Sprint 5 新增）
-
-- **XSS 防护**：`ChatMessage.tsx` 内置 `escapeHtml()` / `sanitizeUrl()` 过滤
-- **安全响应头**：`X-Content-Type-Options` / `X-Frame-Options` / `X-XSS-Protection` / `Referrer-Policy` / `Permissions-Policy`
-- **输入验证**：`/api/chat` 请求体长度和格式限制
-- **依赖漏洞**：`npm audit` 输出 0 vulnerabilities
-
----
-
-## 🔧 开发指南
-
-### 技术栈
-
-- **框架**: Next.js 16 (App Router)
-- **语言**: TypeScript
-- **样式**: Tailwind CSS + CSS Variables
-- **状态管理**: React Hooks
-- **实时通信**: SSE (Server-Sent Events)
-
-### 项目特点
-
-1. **轻量级 Markdown 渲染器**
-   - 无需外部库，自实现常见 Markdown 语法
-   - 支持标题、列表、代码块、表格等
-
-2. **SSE 流式处理**
-   - 自定义 SSE 解析器
-   - 支持增量更新和状态管理
-
-3. **主题系统**
-   - 基于 CSS 变量的主题切换
-   - 易于扩展和定制
-
-### 添加新组件
-
-```typescript
-// src/components/MyComponent.tsx
-"use client";
-
-import { useState } from "react";
-
-export default function MyComponent() {
-  const [state, setState] = useState("");
-  
-  return (
-    <div className="p-4">
-      {/* 组件内容 */}
-    </div>
-  );
-}
-```
-
-### 修改主题
-
-编辑 `src/app/globals.css` 中的 CSS 变量：
-
-```css
-:root {
-  --bg-primary: #0a0a0a;
-  --text-primary: #e5e5e5;
-  --accent-red: #ef4444;
-  /* ... */
-}
-```
-
----
-
-## 📊 性能优化
-
-### 已实施的优化
-
-1. **代码分割**
-   - 按路由自动分割
-   - 组件懒加载
-
-2. **图片优化**
-   - Next.js Image 组件
-   - 自动格式转换和压缩
-
-3. **字体优化**
-   - next/font 自动优化
-   - 字体子集化
-
-### 建议的优化
-
-1. **虚拟滚动**
-   - 对长对话历史使用虚拟列表
-   - 减少 DOM 节点数量
-
-2. **缓存策略**
-   - 使用 SWR 或 React Query
-   - 缓存常见问题的响应
-
-3. **SSE 缓冲优化**
-   - 批量处理 SSE 事件
-   - 减少状态更新频率
-
----
-
-## 🧪 测试
-
-本项目使用 **Vitest 4.1.2** 作为测试框架，配合 React Testing Library 和 MSW 进行组件测试和 API 模拟。
-
-### 测试框架
-
-- **测试框架**: Vitest 4.1.2
-- **组件测试**: @testing-library/react 16.3.2
-- **API 模拟**: MSW (Mock Service Worker) 2.12.14
-- **覆盖率工具**: @vitest/coverage-v8
-- **可视化界面**: @vitest/ui
-
-### 测试命令
+确认服务状态：
 
 ```bash
-# 运行所有测试
+systemctl status fota-web --no-pager
+journalctl -u fota-web -n 80 --no-pager
+curl -fsS http://127.0.0.1:3000/
+```
+
+## systemd 运维命令
+
+```bash
+# 查看状态
+systemctl status fota-web --no-pager
+
+# 查看实时日志
+journalctl -u fota-web -f
+
+# 重启
+sudo systemctl restart fota-web
+
+# 修改 unit 后重新加载
+sudo systemctl daemon-reload
+sudo systemctl restart fota-web
+
+# 修改 /opt/fota-web/.env.local 后重启生效
+sudo systemctl restart fota-web
+```
+
+## 测试与覆盖率
+
+Web 使用 Vitest、React Testing Library、MSW 和 V8 coverage。
+
+```bash
+cd /home/Velab/web
 npm test
-
-# 监听模式（开发时使用）
-npm run test:watch
-
-# 生成覆盖率报告
 npm run test:coverage
-
-# CI 覆盖率门禁（branches/functions/lines/statements）
 npm run test:ci
-
-# 可视化测试界面
 npm run test:ui
 ```
 
-### 配置文件
+覆盖率门禁来自 `vitest.config.ts`：
 
-- [`vitest.config.ts`](vitest.config.ts:1) - Vitest 配置文件。全局覆盖率阈值为 branches ≥ 70%、functions ≥ 70%、lines ≥ 80%、statements ≥ 80%；`src/__tests__/**` 为测试辅助代码，不计入生产覆盖率门禁。
-- [`vitest.setup.ts`](vitest.setup.ts:1) - Vitest 设置文件
+| 指标 | 阈值 |
+| --- | --- |
+| branches | `>= 70%` |
+| functions | `>= 70%` |
+| lines | `>= 80%` |
+| statements | `>= 80%` |
 
-### 详细测试文档
+详细测试说明见 `web/README_TESTING.md`。
 
-完整的测试指南、最佳实践和覆盖率要求请参考：
-- **[`README_TESTING.md`](README_TESTING.md:1)** - 完整测试文档 ⭐
+## 常见排障
 
----
-
-## 🔗 相关文档
-
-- [Next.js 文档](https://nextjs.org/docs)
-- [Tailwind CSS 文档](https://tailwindcss.com/docs)
-- [TypeScript 文档](https://www.typescriptlang.org/docs)
-- [项目完整文档](../claude.md)
-- [后端 API 文档](../backend/README.md)
-
----
-
-## 📝 核心特性
-
-- ✅ **实时流式响应**: 基于 SSE 的实时诊断过程展示
-- ✅ **多场景支持**: 支持多种诊断场景切换
-- ✅ **Markdown 渲染**: 轻量级 Markdown 解析器
-- ✅ **响应式设计**: 支持桌面和移动设备
-- ✅ **主题系统**: 基于 CSS 变量的深色主题
-- ✅ **TypeScript**: 完整的类型安全
-
----
-
-## 🚨 故障排查
-
-### 问题 1：无法连接后端
+### Web 页面打不开
 
 ```bash
-# 检查环境变量
-cat .env.local
-
-# 检查后端服务是否运行
-curl http://localhost:8000/health
-
-# 检查 CORS 配置
-# 确保后端允许前端域名访问
+systemctl status fota-web --no-pager
+journalctl -u fota-web -n 80 --no-pager
+curl -v http://127.0.0.1:3000/
 ```
 
-### 问题 2：SSE 连接中断
+如果本机 3000 正常但域名不通，继续检查 Nginx 反向代理。
+
+### 页面打开但诊断不可用
 
 ```bash
-# 检查网络连接
-# 检查后端日志
-# 确认超时配置（默认 120 秒）
+grep '^BACKEND_URL=' /opt/fota-web/.env.local
+curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8000/ready
+curl -fsS http://<web-domain>/backend-api/ready
 ```
 
-### 问题 3：样式不生效
+优先看 `/ready` 返回的依赖检查项，再检查 `BACKEND_URL` 是否指向生产 backend。
+
+### 登录页或鉴权状态异常
 
 ```bash
-# 清除 Next.js 缓存
-rm -rf .next
-
-# 重新构建
-npm run build
+grep -E '^(WEB_AUTH_ENABLED|NEXT_PUBLIC_WEB_AUTH_ENABLED|AUTH_SESSION_SECRET|BACKEND_API_KEY)=' /opt/fota-web/.env.local
+sudo systemctl restart fota-web
 ```
 
----
+`WEB_AUTH_ENABLED` 与 `NEXT_PUBLIC_WEB_AUTH_ENABLED` 应保持一致。`AUTH_SESSION_SECRET` 改动会使旧 cookie 失效，需要重新登录。
 
-## 📞 技术支持
+### SSE 中断或响应超时
 
-如有问题，请查看：
-1. 本 README 的故障排查章节
-2. [项目完整文档](../claude.md)
-3. Next.js 官方文档
+```bash
+journalctl -u fota-web -f
+curl -fsS http://<web-domain>/backend-api/ready
+```
 
----
+同时检查 Nginx 对 `/api/chat` 的代理超时配置是否足够支撑长连接。
 
-**项目状态**: 🚧 开发中  
-**最后更新**: 2026-05-03  
-**维护团队**: FOTA 诊断平台团队
+## 维护提示
+
+- 只把示例密钥写成占位符，不提交真实 `.env.local`。
+- 修改 BFF 路由时，同步更新本文档的转发表和测试文档中的 API 测试说明。
+- 发布前至少运行 `npm run build` 与 `npm run test:ci`。
+
+**最后更新**: 2026-06-04

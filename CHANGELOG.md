@@ -6,7 +6,19 @@
 
 ## [Unreleased]
 
+### Added
+- **Sprint 7 轻量鉴权收口**：
+  - 后端新增 `common/auth.py`，当 `AUTH_ENABLED=true` 时保护 `/chat` 与 `/api/*`，支持 `Authorization: Bearer <AUTH_API_KEY>` 与 `X-API-Key`。
+  - 前端新增 `/api/auth/login`、`/api/auth/logout`、`/api/auth/status` 和 `AuthGate`，生产可用 `WEB_AUTH_ENABLED=true` + `NEXT_PUBLIC_WEB_AUTH_ENABLED=true` 开启 httpOnly cookie 登录门。
+  - Next.js 业务代理统一使用服务端 `BACKEND_API_KEY` 转发后端鉴权，不向浏览器暴露后端 API Key。
+- **代理路由边界校验**：`bundle-status` / `bundle-logs` / `bundle-events` / `sessions/[sessionId]` 补 UUID 校验；非法 ID 在 Next 代理层直接返回 400，后端不可达统一返回 502。
+- **数据复现与清理脚本**：
+  - `backend/scripts/seed_demo_data.py`：在被 `.gitignore` 排除的 `backend/data/` 下生成安全合成演示数据。
+  - `backend/scripts/cleanup_data.py`：按年龄清理 workspace / uploads / work / bundles，默认 dry-run，支持 `--execute`、`--include-docs`、`--include-indexes`。
+- **架构记录**：新增 `docs/decisions/ADR-001-lightweight-api-key-auth.md`，明确本轮 API Key + httpOnly cookie 是生产试运行保护边界，不等同于完整 IAM。
+
 ### Changed
+- **文档状态同步**：`docs/TODO.md` 更新到 Sprint 7，纠正真实 Jira 同步已具备基础能力、测试数量、剩余待办与数据复现策略；`backend/README.md` / `web/README.md` / `web/.env.example` 补充生产鉴权配置。
 - **技术债深度清理（零 lint 错误目标）**
   - 后端 `datetime.utcnow()` 全量替换为 `datetime.now(timezone.utc)`：
     `models/case.py`、`models/chat_session.py`、`models/diagnosis.py`、`api/feedback.py`、`api/session_store.py`、`services/semantic_cache.py`、`tests/conftest.py`（SQLAlchemy `Column(default=)` 用 lambda 包装）。`pytest -W error::DeprecationWarning` 通过。
@@ -19,6 +31,11 @@
 - **新增 `backend/.flake8` 配置**：`max-line-length = 127`，`extend-ignore = E203`（PEP 8 切片风格分歧），`max-complexity = 25`，`per-file-ignores = agents/orchestrator.py:E501,C901`（系统提示词长字符串与 orchestrate 协调函数）。
 
 ### Verified
+- 后端 `pytest tests/ log_pipeline/tests/ -q` → **480 passed**。
+- 前端 `npm test -- --run` → **245 passed**。
+- 前端 `npm run lint` 与 `npm run build` → 通过。
+- 后端 flake8 严格检查 `E9,F63,F7,F82` → **0 issues**。
+- 前端 `npm audit --omit=dev` → **0 vulnerabilities**。
 - 后端 `flake8 .` → **0 issues**；CI 严格模式（`E9,F63,F7,F82`）→ **0 issues**。
 - 后端 `pytest -q` → **444 passed**（无回归）。
 - 前端 `npm test -- --run` → **237 passed | 0 skipped**（11 个先前 skipped 用例全部修复并通过：FeedbackButtons 6 个改用 `fireEvent` + `vi.useFakeTimers` 同步驱动；page.test 5 个改用 `server.use(http.post('/api/chat', ...))` 覆盖 MSW handler，避免 `global.fetch = mockFetch` 被 MSW 拦截器旁路）。
@@ -273,4 +290,3 @@
 - `gateway/`：基于 LiteLLM 的模型网关配置（多模型路由、负载均衡）。
 - `log_pipeline/` 子系统：DLT 解码器、FOTA 文本解码器、事件规则引擎、SQLite bundle catalog、NDJSON 流式查询。
 - PostgreSQL + Redis 基础设施集成，systemd 服务单元文件。
-

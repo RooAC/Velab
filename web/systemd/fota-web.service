@@ -20,7 +20,7 @@ EnvironmentFile=/opt/fota-web/.env.local
 Environment=NODE_ENV=production
 
 # Node 环境下的启动指令
-ExecStart=/usr/bin/npm run start
+ExecStart=/opt/fota-web/node_modules/.bin/next start --hostname 127.0.0.1
 
 # 日志输出接管
 StandardOutput=journal

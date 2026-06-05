@@ -168,7 +168,15 @@ class RCASynthesizerAgent(BaseAgent):
             return ""
         try:
             from pathlib import Path
-            notes_path = Path(context["workspace_path"]) / "notes.md"
+            ws_path_raw = context.get("workspace_path", "")
+            if not isinstance(ws_path_raw, str) or not ws_path_raw:
+                return ""
+            ws_root = Path(ws_path_raw).resolve()
+            notes_path = (ws_root / "notes.md").resolve()
+            # 防止路径遍历：确保 notes.md 仍在 workspace 目录内
+            if not str(notes_path).startswith(str(ws_root) + "/") and notes_path != ws_root:
+                log.warning("Path traversal detected in workspace_path, aborting notes read")
+                return ""
             if notes_path.exists():
                 content = notes_path.read_text(encoding="utf-8")
                 log.debug("Workspace notes loaded: %d chars", len(content))

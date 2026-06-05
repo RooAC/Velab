@@ -18,6 +18,7 @@
  */
 
 import { NextRequest } from "next/server";
+import { backendAuthHeaders, requireWebSession } from "@/lib/serverAuth";
 
 // 后端服务地址，优先使用环境变量配置
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
@@ -45,6 +46,9 @@ export const maxDuration = 120;
  * })
  */
 export async function POST(request: NextRequest) {
+  const authError = requireWebSession(request);
+  if (authError) return authError;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -83,7 +87,7 @@ export async function POST(request: NextRequest) {
     // 转发请求到后端服务
     const backendResponse = await fetch(`${BACKEND_URL}/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: backendAuthHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
       signal: controller.signal,
     });
